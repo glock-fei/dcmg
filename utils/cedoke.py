@@ -116,7 +116,6 @@ def start_scm_job_container(
         gsd_cm: float = 0.32,
         big_threshold: float = 0.3,
         small_threshold: float = 0.2,
-        private_key: Optional[str] = None,
 ):
     """
     Start a container to run the SCM job.
@@ -131,7 +130,6 @@ def start_scm_job_container(
         gsd_cm: float, the ground sample distance in cm.
         big_threshold: float, the threshold for big objects in the image.
         small_threshold: float, the threshold for small objects in the image.
-        private_key: Optional[str]
     envs:
         NOMAD_META_NO_ID: str, the unique id of the job.
         PROGRESS_URL: str, the url to update the progress of the job.
@@ -154,7 +152,7 @@ def start_scm_job_container(
         "--big_threshold", str(big_threshold),
         "--small_threshold", str(small_threshold),
         "--output_dir", CONTAINER_OUTPUT_DIR,
-        "--private_key", private_key,
+        "--private_key", os.getenv("SCM_PRIVATE_KEY"),
     ]
 
     if ridge_spacing_cm:

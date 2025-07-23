@@ -25,7 +25,6 @@ async def run_job_with_imgzip(
         ridge_spacing_cm: Optional[float] = None,
         big_threshold: float = 0.2,
         small_threshold: float = 0.3,
-        private_key: Optional[str] = "8Qp6DNRfKaR1h!jv",
         db: Session = Depends(get_database)
 ):
     """
@@ -86,8 +85,7 @@ async def run_job_with_imgzip(
         ridge_spacing_cm=ridge_spacing_cm,
         gsd_cm=gsd_cm,
         big_threshold=big_threshold,
-        small_threshold=small_threshold,
-        private_key=private_key
+        small_threshold=small_threshold
     )
 
     # Create a new task in the database

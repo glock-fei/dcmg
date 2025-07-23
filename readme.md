@@ -41,6 +41,7 @@ SERVICE_PORT = 7700
 SERVICE_HOST_GATEWAY = "dcmg.host.server"
 STATIC_DIR = "static"
 SCM_IMAGE = "registry.cn-shenzhen.aliyuncs.com/glock/yoscm:0.0.2-det"
+SCM_PRIVATE_KEY = "8Qp6DNRfKaR1h!jv"
 PROGRESS_URL = "http://${SCM_HOST_GATEWAY}:${SCM_SERVICE_PORT}/api/scm/update_job_progress"
 REPORT_URL = "http://${SCM_HOST_GATEWAY}:${SCM_SERVICE_PORT}/api/scm/save_report"
 
