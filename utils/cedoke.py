@@ -5,15 +5,17 @@ import uuid
 import zipfile
 from enum import Enum
 from pathlib import Path
-from typing import Optional, Union
+from typing import Optional, Union, BinaryIO, Callable
 
 import docker
 from docker.types import DeviceRequest
 from docker.errors import DockerException
+from fastapi import UploadFile
 from pydantic import BaseModel
 
 
 class JobStatus(Enum):
+    Waiting = "waiting"
     Running = "running"
     Completed = "completed"
     Failed = "failed"
@@ -29,10 +31,74 @@ class JobRunner(BaseModel):
     run_id: Optional[str] = None
 
 
+class JobSettings(BaseModel):
+    """
+    The settings of a job.
+    """
+    images_dir: str
+    run_id: Optional[str] = None
+    job_name: Optional[str] = None
+    gsd_cm: float = 0.32
+    row_spacing_cm: float = 80.0
+    plant_spacing_cm: float = 10.0
+    ridge_spacing_cm: Optional[float] = None
+    big_threshold: float = 0.2
+    small_threshold: float = 0.3
+
+
+def calculate_healthy_score(vaild_ratio: float, total_ratio: float):
+    """
+    Calculate the healthy score of a job.
+    args:
+        vaild_ratio: float, the ratio of valid objects.
+        total_ratio: float, the ratio of total objects.
+    returns:
+        score: float, the healthy score of the job.
+        level: str, the level of the score.
+    """
+    total_ratio = total_ratio * 0.01
+    vaild_ratio = vaild_ratio * 0.01
+    score = round(min(total_ratio / 0.7, 1) * 60 + min(vaild_ratio / 0.7, 1) * 40, 1)
+
+    if score >= 90:
+        level = 'great'
+    elif score >= 70:
+        level = 'good'
+    elif score >= 40:
+        level = 'general'
+    else:
+        level = 'bad'
+
+    return score, level
+
+
+def move_ownership(src_file: UploadFile) -> UploadFile:
+    """
+    Move ownership of a file to a new UploadFile object.
+    issue:
+        Passing UploadFile objects into a StreamingResponse closes it in v0.106.0 but not v0.105.0
+        see https://github.com/fastapi/fastapi/issues/10857 @msehnout
+    args:
+        src_file: UploadFile, the file to move ownership.
+    returns:
+        new_file: UploadFile, a new UploadFile object with ownership of the file.
+    """
+    dst_file = UploadFile(
+        file=src_file.file,
+        size=src_file.size,
+        filename=src_file.filename,
+        headers=src_file.headers,
+    )
+    src_file.file = BinaryIO()
+
+    return dst_file
+
+
 def extract_files_from_zip(
         filezip_path: Union[str, Path],
         output_dir: Union[str, Path],
-        include_patterns: Optional[list] = None
+        include_patterns: Optional[list] = None,
+        is_copy: bool = True
 ):
     """
     Extract files from a zip file to a directory.
@@ -40,6 +106,7 @@ def extract_files_from_zip(
         filezip_path: Union[str, Path], the path of the zip file.
         output_dir: Union[str, Path], the directory to store the extracted files.
         include_patterns: Optional[list], lowercase file extensions to include in the extraction.
+        is_copy: bool, whether to copy the files from the zip to the output directory.
     """
     dst_files = []
 
@@ -56,13 +123,16 @@ def extract_files_from_zip(
             if not target_path.is_relative_to(output_dir.resolve()):
                 logging.error("Skipping file %s outside of output directory", imgfile.filename)
                 continue
+            # Save the file path and the zip info object for later use
+            dst_files.append([target_path, imgfile])
 
-            # Save the image to the output directory
-            with zip_ref.open(imgfile) as src, open(target_path, 'wb') as dst:
-                shutil.copyfileobj(src, dst)
-
-                dst_files.append(target_path)
-                logging.info("Extracting %s to %s", imgfile.filename, target_path)
+        if is_copy:
+            # copy the files from the zip to the output directory
+            for i, (dst_path, src_path) in enumerate(dst_files, 1):
+                with zip_ref.open(src_path) as src, open(dst_path, 'wb') as dst:
+                    # Copy the file from the zip to the output directory
+                    shutil.copyfileobj(src, dst)
+                    logging.info("Extracting %s to %s", src_path.filename, dst_path)
 
     return dst_files
 
@@ -170,8 +240,8 @@ def start_scm_job_container(
         tty=True,
         environment={
             "NOMAD_META_NO_ID": run_id,
-            "PROGRESS_URL": os.getenv("PROGRESS_URL"),
-            "REPORT_URL": os.getenv("REPORT_URL"),
+            "SCM_PROGRESS_URL": os.getenv("SCM_PROGRESS_URL"),
+            "SCM_REPORT_URL": os.getenv("SCM_REPORT_URL"),
             "OSS_ACCESS_KEY_ID": os.getenv("OSS_ACCESS_KEY_ID"),
             "OSS_ACCESS_KEY_SECRET": os.getenv("OSS_ACCESS_KEY_SECRET"),
             "OSS_BUCKET": os.getenv("OSS_BUCKET"),

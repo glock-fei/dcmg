@@ -9,7 +9,7 @@ class Job(Base):
 
     id = Column(Integer, primary_key=True)
     run_id = Column(String(16), nullable=False, unique=True, index=True)
-    job_name = Column(String(255), nullable=False)
+    job_name: Column = Column(String(255), nullable=False)
     images_dir = Column(String(255), nullable=False)
     output_dir = Column(String(255), nullable=False)
     log_file = Column(String(255), nullable=False)
@@ -22,6 +22,7 @@ class Job(Base):
     big_threshold = Column(Float, nullable=False)
     small_threshold = Column(Float, nullable=False)
     progress = Column(Float, default=0.0)
+    status: Column = Column(String(16), default='waiting')
 
     area_mu = Column(Float, default=0.0)
     num_big = Column(Integer, default=0)
@@ -36,6 +37,8 @@ class Job(Base):
     total_ratio = Column(Float, default=0.0)
     vaild_ratio = Column(Float, default=0.0)
     avg_pixel_area = Column(Float, default=0.0)
+    score = Column(Float, default=0.0)
+    level = Column(String(8), nullable=True)
 
     container_id = Column(String(64), nullable=True)
     create_at = Column(DateTime, nullable=False, default=datetime.now())

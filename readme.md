@@ -33,17 +33,19 @@ pip install -r requirements.txt
 
 ## Set environment variables
 ```bash
-# create a .env file in the root directory
-touch .env
+# create a .env file in the root directory, and set the following variables:
+vim .env
 
-# add the following environment variables to the .env file
+# service configuration
 SERVICE_PORT = 7700
 SERVICE_HOST_GATEWAY = "dcmg.host.server"
 STATIC_DIR = "static"
+
+# SCM configuration
 SCM_IMAGE = "registry.cn-shenzhen.aliyuncs.com/glock/yoscm:0.0.2-det"
 SCM_PRIVATE_KEY = "8Qp6DNRfKaR1h!jv"
-PROGRESS_URL = "http://${SCM_HOST_GATEWAY}:${SCM_SERVICE_PORT}/api/scm/update_job_progress"
-REPORT_URL = "http://${SCM_HOST_GATEWAY}:${SCM_SERVICE_PORT}/api/scm/save_report"
+SCM_PROGRESS_URL = "http://${SERVICE_HOST_GATEWAY}:${SERVICE_PORT}/api/scm/update_job_progress"
+SCM_REPORT_URL = "http://${SERVICE_HOST_GATEWAY}:${SERVICE_PORT}/api/scm/save_report"
 
 # OSS configuration
 OSS_ACCESS_KEY_ID = ""

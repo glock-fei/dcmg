@@ -1,0 +1,37 @@
+# 报告参数说明
+
+- gsd: 大疆无人机GCD
+- area_mu: 地块总亩数
+- medium_ratio: 中苗比例
+- level: 健康等级
+  - great: 非常好
+  - good:较好
+  - general:一般
+  - bad:较差
+- num_of_per_mu: 亩出苗数
+- num_of_picture_mu: 图片实际计算株数(根据垄宽、行距、株间距等参数)
+- run_id: 任务id
+- row_spacing: 行距
+- num_big: 大苗株数
+- samll_ratio: 小苗比例
+- container_id: 运行任务的容器id
+- job_name: 任务名称
+- plant_spacing: 株间距
+- num_medium: 中苗株数
+- create_at: 任务创建时间
+- images_dir: 输入图片的文件夹路径
+- ridge_spacing: 垄宽
+- num_small: 小苗株数
+- total_ratio: 总苗比例
+- output_dir: 推理结果输出文件夹路径
+- big_threshold: 大苗阈值
+- num_total: 总苗株数
+- vaild_ratio: 有效苗比例
+- log_file: 日志文件路径
+- small_threshold: 小苗阈值
+- avg_pixel_area: 平均像素面积,
+- images_total_num: 输入图片总数,
+- progress: 任务进度,
+- score: 健康评分
+- images_detect_num: 成功推理的图片数,
+- big_ratio: 大苗比例

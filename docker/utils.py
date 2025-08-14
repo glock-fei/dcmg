@@ -20,7 +20,7 @@ def send_progress(percent: float):
     """
     # todo please implement this function to send progress to your server.
     try:
-        with requests.get(os.getenv("PROGRESS_URL"),
+        with requests.get(os.getenv("SCM_PROGRESS_URL"),
                           params={"percent": percent, "run_id": os.getenv("NOMAD_META_NO_ID")},
                           timeout=(1, 1)) as res:
             res.raise_for_status()
@@ -90,7 +90,7 @@ def send_detection_results(report_filename: Path):
         with open(report_filename, "r", encoding="utf-8") as report:
             data = json.load(report)
 
-            with requests.post(os.getenv("REPORT_URL"), json=data, timeout=(2, 2)) as res:
+            with requests.post(os.getenv("SCM_REPORT_URL"), json=data, timeout=(2, 2)) as res:
                 res.raise_for_status()
 
                 log.info("Send detection results successed")
