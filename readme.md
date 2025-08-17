@@ -1,74 +1,139 @@
-# DCMG
-A lightweight FastAPI service to manage Docker containers.
+# DCMG - Drone Crop Monitoring Gateway
+
+A lightweight FastAPI service to manage Docker containers and process agricultural drone imagery for crop monitoring.
 
 No frontend (API-only), easy to extend.
 
-Exposes REST APIs to interact with Docker (start/stop containers).
+Exposes REST APIs to interact with Docker containers and OpenDroneMap (ODM) processing tasks.
+
+## Directory
+```plaintext
+dcmg/
+├── alembic/                     # Database migrations
+│   ├── versions/                # Migration scripts
+├── models/                      # Database models
+│   ├── __init__.py
+│   └── session.py               # Database session management
+├── routers/                     # API endpoints
+│   ├── __init__.py
+│   ├── api.py                   # Main API router
+│   └── v1/                      # API version 1
+├── utils/                       # Utility functions
+│   ├── __init__.py
+├── worker/                      # Celery worker
+│   ├── app.py                   # Celery app config
+│   └── tasks/                   # Task implementations
+│       ├── __init__.py
+├── static/                      # Static files
+├── tmp/                         # Temporary files
+├── main.py                      # Application entry
+├── requirements.txt             # Dependencies
+├── .env.example                 # Env vars template
+└── README.md                    # Documentation
+```
+
+## Features
+
+1. **Docker Container Management**:
+   - Start/stop Docker containers for image processing tasks
+   - Monitor container status and logs
+   - Manage container lifecycle
+
+2. **Drone Image Processing Pipeline**:
+   - Process agricultural drone imagery using OpenDroneMap (ODM)
+   - Handle image copying and preprocessing tasks
+   - Track processing progress and status
+
+3. **Crop Status Monitoring (CSM)**:
+   - Deep learning-based plant growth monitoring system
+   - Analyzes plant images to provide real-time crop status evaluation
+   - Calculates statistical metrics for crop health assessment
+
+4. **Task Management**:
+   - Asynchronous task processing with Celery
+   - Database-backed job tracking and persistence
+   - Real-time progress updates
 
 ## Requirements
+
 - Docker
 - Python 3.9+
+- Redis (for Celery broker/result backend)
 - FastAPI
 - Docker SDK for Python
+- SQLAlchemy
+- Celery
+- OpenDroneMap server
+
+## Technology Stack
+
+- **Web Framework**: FastAPI (Python)
+- **Database**: SQLAlchemy with Alembic migrations
+- **Asynchronous Task Queue**: Celery with Redis backend
+- **Containerization**: Docker Engine API
+- **Message Broker**: Redis
+- **Image Processing**: OpenDroneMap (ODM)
+- **Serialization**: Pydantic models
+- **ORM**: SQLAlchemy
+- **Database Migrations**: Alembic
+
 
 ## Installation
 ```bash
-# clone the repository
+# Clone the repository
 git clone https://github.com/glock-fei/dcmg.git
 cd dcmg
 
-# create static, tmp directories
-mkdir static
-mkdir tmp
+# Create static and tmp directories (if needed)
+mkdir static tmp
 
-# create a virtual environment
+# Create a virtual environment
 python -m venv venv 
 
-# activate the virtual environment  
-source venv/bin/activate
+# Activate the virtual environment
+source venv/bin/activate # Linux/Mac
+# or
+venv\Scripts\activate # Windows
 
 # install requirements
 pip install -r requirements.txt
 ````
 
-## Set environment variables
+## Redis Setup
 ```bash
-# create a .env file in the root directory, and set the following variables:
-vim .env
+# Pull Redis image
+docker pull redis:latest
+# Run Redis container
+docker run --name my-redis -d -p 6379:6379 redis:latest 
+```
 
-# service configuration
-SERVICE_PORT = 7700
-SERVICE_HOST_GATEWAY = "dcmg.host.server"
-STATIC_DIR = "static"
+## Start celery worker
+```bash
+# Start the Celery worker
+celery -A worker.app worker --loglevel=info
+````
+## Configuration
 
-# SCM configuration
-SCM_IMAGE = "registry.cn-shenzhen.aliyuncs.com/glock/yoscm:0.0.2-det"
-SCM_PRIVATE_KEY = "8Qp6DNRfKaR1h!jv"
-SCM_PROGRESS_URL = "http://${SERVICE_HOST_GATEWAY}:${SERVICE_PORT}/api/scm/update_job_progress"
-SCM_REPORT_URL = "http://${SERVICE_HOST_GATEWAY}:${SERVICE_PORT}/api/scm/save_report"
-
-# OSS configuration
-OSS_ACCESS_KEY_ID = ""
-OSS_ACCESS_KEY_SECRET = ""
-OSS_BUCKET = ""
-OSS_ENDPOINT = ""
-OSS_REGION = ""
-OSS_DOAMIN = "" # oss domain
-OSS_UPLOAD_KEY = "" # oss upload key
+### Set environment variables by copying the example file
+```bash
+# Edit .env file with your configuration
+copy .env.example .env
 ``` 
-## Set up database
+
+## Database Setup
 ```bash
-# create a new migration
+# Create database migrations (if needed)
 # alembic revision --autogenerate -m "init"
 
-# upgrade the database
+# Upgrade the database to the latest versio
 alembic upgrade head
 ```
 
-## Run the app
+## Run the Application
 ```bash
-
 python main.py
+# Or with uvicorn:
+uvicorn main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
 

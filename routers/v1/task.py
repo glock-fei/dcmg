@@ -38,7 +38,7 @@ async def upload_imgzip_with_usb(image: str):
 
     - **upload_progress**: The progress of the upload.
     """
-    imgzip = Path(os.getenv("MOUNT_USB_PATH")).joinpath(image.strip("/"))
+    imgzip = Path(os.getenv("MOUNT_USB_DIR")).joinpath(image.strip("/"))
     if not imgzip.name.endswith(".zip"):
         raise HTTPException(400, "Only ZIP files are allowed")
 

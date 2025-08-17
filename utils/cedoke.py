@@ -5,7 +5,7 @@ import uuid
 import zipfile
 from enum import Enum
 from pathlib import Path
-from typing import Optional, Union, BinaryIO, Callable
+from typing import Optional, Union, BinaryIO
 
 import docker
 from docker.types import DeviceRequest
