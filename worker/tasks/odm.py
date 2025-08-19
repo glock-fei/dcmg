@@ -9,7 +9,7 @@ from typing import Union
 from celery.contrib.abortable import AbortableTask, AbortableAsyncResult
 from fastapi import HTTPException
 
-from utils import cancel_odm_task, commit_odm_task, OdmJobStatus, OdmState
+from utils import remove_odm_task, commit_odm_task, OdmJobStatus, OdmState
 from worker.app import app
 from models import with_db_session, RsdmJobs
 
@@ -135,7 +135,7 @@ def abort_task(celery_task_id: str, project_id: int, task_id: str, base_url: str
     else:
         logger.warning("Celery task %s not found, skipping abort.", celery_task_id)
 
-    return cancel_odm_task(project_id, task_id, base_url)
+    return remove_odm_task(project_id, task_id, base_url)
 
 
 def get_current_state(celery_task_id: str) -> Union[OdmState, None]:

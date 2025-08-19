@@ -1,0 +1,68 @@
+{
+  "bands": {
+    "R": "red",
+    "G": "green",
+    "B": "blue",
+    "N": "nir",
+    "RE": "rededge"
+  },
+  "algos": [
+    {
+      "name": "NDVI",
+      "colormap": "colorbrewer:RdYlGn",
+      "expr": "(N - R) / (N + R)",
+      "help": "Normalized Difference Vegetation Index shows the amount of green vegetation.",
+      "range": [
+        -1,
+        1
+      ],
+      "normalized_report": [
+        {
+          "title": "弱--区域占比",
+          "mark": "弱--",
+          "color": "#FF7B60",
+          "range_lc_ro": [
+            0.00,
+            0.25
+          ]
+        },
+        {
+          "title": "弱区域占比",
+          "mark": "弱",
+          "color": "#FF7B60",
+          "range_lc_ro": [
+            0.25,
+            0.50
+          ]
+        },
+        {
+          "title": "平均区域占比",
+          "mark": "平均",
+          "color": "#A3D439",
+          "range_lc_ro": [
+            0.50,
+            0.70
+          ]
+        },
+        {
+          "title": "旺区域占比",
+          "mark": "旺",
+          "color": "#A3D439",
+          "range_lc_ro": [
+            0.70,
+            0.85
+          ]
+        },
+        {
+          "title": "旺++区域占比",
+          "mark": "旺++",
+          "color": "#A3D439",
+          "range_lc_ro": [
+            0.85,
+            1.01
+          ]
+        }
+      ]
+    }
+  ]
+}

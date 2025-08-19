@@ -48,7 +48,7 @@ async def get_odm_jobs(
     - **run_id**: Job unique identifier
     - **odm_project_id**: Related project ID
     - **odm_job_name**: Human-readable job name
-    - **odm_folder_path**: Data storage path
+    - **odm_src_folder**: Data storage path
     - ...other fields...
 
     ### Example
@@ -112,7 +112,7 @@ async def create_odm_job(data: OdmJob, db: Session = Depends(get_database)):
     - **run_id**: Job unique identifier
     - **odm_project_id**: Related project ID
     - **odm_job_name**: Human-readable job name
-    - **odm_folder_path**: Data storage path
+    - **odm_src_folder**: Data storage path
     - ...other fields...
 
     ### Example
@@ -156,7 +156,7 @@ async def create_odm_job(data: OdmJob, db: Session = Depends(get_database)):
     images = find_images(src_folder=odm_src_folder, fot=data.odm_job_type)
     # if no images, return error message and remove the job from the database
     if len(images) == 0:
-        logging.warning('No images found in %s', data.odm_folder_path)
+        logging.warning('No images found in %s', data.odm_src_folder)
         remove_odm_task(data.odm_project_id, data.odm_task_id, data.odm_host)
         # raise HTTPException
         raise HTTPException(status_code=404,
@@ -198,14 +198,14 @@ async def create_odm_job(data: OdmJob, db: Session = Depends(get_database)):
 
 
 @router.get('/get_odm_state')
-async def get_odm_state(projec_id: int, task_id: str, db: Session = Depends(get_database)) -> OdmState:
+async def get_odm_state(project_id: int, task_id: str, db: Session = Depends(get_database)) -> OdmState:
     """
     ## Get the current state of an ODM task.
 
     This endpoint retrieves the current state of an ODM task.
 
     ### Parameters
-    - **projec_id**: The project ID of the ODM task
+    - **project_id**: The project ID of the ODM task
     - **task_id**: The task ID of the ODM task
 
     ### Response:
@@ -225,7 +225,7 @@ async def get_odm_state(projec_id: int, task_id: str, db: Session = Depends(get_
     }
     ```
     """
-    job: RsdmJobs = db.query(RsdmJobs).filter(RsdmJobs.odm_project_id == projec_id,
+    job: RsdmJobs = db.query(RsdmJobs).filter(RsdmJobs.odm_project_id == project_id,
                                               RsdmJobs.odm_task_id == task_id).first()
     if not job:
         raise HTTPException(status_code=404, detail="Odm task not found")
@@ -239,7 +239,7 @@ async def get_odm_state(projec_id: int, task_id: str, db: Session = Depends(get_
 
 
 @router.get('/cancel_odm_job')
-async def cancel_odm_job(projec_id: int, task_id: str, db: Session = Depends(get_database)):
+async def cancel_odm_job(project_id: int, task_id: str, db: Session = Depends(get_database)):
     """
     ## Cancel an ODM task that is pending, running, or waiting.
 
@@ -247,10 +247,11 @@ async def cancel_odm_job(projec_id: int, task_id: str, db: Session = Depends(get
     1. Finding the job in the database using project_id and task_id
     2. Checking if the job is in a state that can be cancelled (pending, running, or waiting)
     3. Initiating the cancellation of the Celery task
-    4. Updating the job status in the database to canceled
+    4. ODM server will remove the task
+    5. Updating the job status in the database to canceled
 
     ### Parameters
-    - **projec_id**: The project ID of the ODM task
+    - **project_id**: The project ID of the ODM task
     - **task_id**: The task ID of the ODM task
 
     ### Response:
@@ -258,7 +259,7 @@ async def cancel_odm_job(projec_id: int, task_id: str, db: Session = Depends(get
     - **run_id**: Job unique identifier
     - **odm_project_id**: Related project ID
     - **odm_job_name**: Human-readable job name
-    - **odm_folder_path**: Data storage path
+    - **odm_src_folder**: Data storage path
     - ...other fields...
 
     ### Raises:
@@ -267,7 +268,7 @@ async def cancel_odm_job(projec_id: int, task_id: str, db: Session = Depends(get
     - **HTTPException:** Raises 500 if the ODM server is not available or the job could not be cancelled
     """
     # Query the database for the specified job
-    job: RsdmJobs = db.query(RsdmJobs).filter(RsdmJobs.odm_project_id == projec_id,
+    job: RsdmJobs = db.query(RsdmJobs).filter(RsdmJobs.odm_project_id == project_id,
                                               RsdmJobs.odm_task_id == task_id).first()
 
     # Raise 404 error if job is not found
@@ -280,7 +281,7 @@ async def cancel_odm_job(projec_id: int, task_id: str, db: Session = Depends(get
         logging.warning(warning_message)
         raise HTTPException(status_code=400, detail=warning_message)
 
-    if not abort_task(celery_task_id=job.celery_task_id, project_id=projec_id, task_id=task_id, base_url=job.odm_host):
+    if not abort_task(celery_task_id=job.celery_task_id, project_id=project_id, task_id=task_id, base_url=job.odm_host):
         raise HTTPException(status_code=500, detail="Failed to cancel ODM task, because odm server is not available.")
 
     # Update job status to canceled in database
@@ -294,15 +295,14 @@ async def cancel_odm_job(projec_id: int, task_id: str, db: Session = Depends(get
 
 
 @router.get('/remove_odm_job', status_code=status.HTTP_204_NO_CONTENT)
-async def remove_odm_job(projec_id: int, task_id: str, db: Session = Depends(get_database)) -> None:
+async def remove_odm_job(project_id: int, task_id: str, db: Session = Depends(get_database)) -> None:
     """
     ### Remove an ODM task that is completed, failed, or canceled.
 
     This endpoint attempts to remove an ODM task by:
     1. Finding the job in the database using project_id and task_id
     2. Checking if the job is in a state that can be removed (completed, failed, or canceled)
-    3. Remove the task from the ODM server
-    4. Deleting the job from the database
+    3. Deleting the job from the database
 
     ### Returns:
     - **None:** Returns 204 No Content if the job was successfully removed from the database
@@ -310,11 +310,10 @@ async def remove_odm_job(projec_id: int, task_id: str, db: Session = Depends(get
     ### Raises:
     - **HTTPException:** Raises 404 if the job is not found
     - **HTTPException:** Raises 400 if the job is not in a state that can be removed (completed, failed, or canceled)
-    - **HTTPException:** Raises 500 if the ODM server is not available or the job could not be removed from the database
 
     """
     # Query the database for the specified job
-    job: RsdmJobs = db.query(RsdmJobs).filter(RsdmJobs.odm_project_id == projec_id,
+    job: RsdmJobs = db.query(RsdmJobs).filter(RsdmJobs.odm_project_id == project_id,
                                               RsdmJobs.odm_task_id == task_id).first()
 
     # Raise 404 error if job is not found
@@ -324,9 +323,6 @@ async def remove_odm_job(projec_id: int, task_id: str, db: Session = Depends(get
     if job.state not in [OdmJobStatus.completed.value, OdmJobStatus.failed.value, OdmJobStatus.canceled.value]:
         raise HTTPException(status_code=400,
                             detail="ODM task must be completed, failed, or canceled before it can be removed.")
-
-    if not remove_odm_task(project_id=projec_id, task_id=task_id, base_url=job.odm_host):
-        raise HTTPException(status_code=500, detail="Failed to remove ODM task, because odm server is not available.")
 
     db.delete(job)
     db.commit()
