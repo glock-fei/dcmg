@@ -1,0 +1,14 @@
+services:
+  rsdm:
+    image: registry.cn-shenzhen.aliyuncs.com/glock/rsdm:0.0.1-dev
+    container_name: rsdm
+    volumes:
+      - ./images:/media:ro,z # please modify the path to your image directory(./images is just an example)
+      - ./license:/app/license
+      - ./output:/app/images/output
+    entrypoint: /bin/sh -c "cp -r /media/* /app/images/ && ./start && rm -rf /media/*"
+    environment:
+      - GLOCK_LOG_LEVEL=INFO
+      - TZ=Asia/Shanghai
+      - RSDM_PRIVATE_KEY=FshGzcaQQliP7eXU
+    restart: unless-stopped

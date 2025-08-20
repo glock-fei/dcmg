@@ -1,7 +1,6 @@
 import os
-import logging.config
+from kombu import Queue
 from celery import Celery
-from celery.signals import setup_logging
 
 
 # @setup_logging.connect
@@ -29,8 +28,12 @@ celery_config = {
 
     # Task routing and naming
     "task_routes": {
-        "worker.tasks": {"queue": "default"},
+        "worker.tasks.*": {"queue": "default"},
     },
+    "task_queues": (
+        Queue("default", routing_key="default"),
+        Queue("odm_report", routing_key="odm_report"),
+    ),
 
     # Worker settings
     "worker_concurrency": 1,

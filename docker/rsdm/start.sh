@@ -41,5 +41,5 @@ docker run --rm \
   -v "$LICENSE:/app/license" \
   -v "$ALGOS:/app/algos.json" \
   -e "RSDM_PRIVATE_KEY=$PRIVATE_KEY" \
-  registry.cn-shenzhen.aliyuncs.com/sf-work/rsdm:0.0.1-dev \
+  registry.cn-shenzhen.aliyuncs.com/glock/rsdm:0.0.1-dev \
   /bin/bash -c "cp -r /media/* /app/images/ && ./start"

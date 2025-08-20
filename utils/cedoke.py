@@ -268,11 +268,11 @@ def start_scm_job_container(
                 "bind": CONTAINER_OUTPUT_DIR,
                 "mode": "rw"
             },
-            str(work_dir / "docker/license"): {
+            str(work_dir / "docker/scm/license"): {
                 "bind": "/app/license",
                 "mode": "ro"
             },
-            str(work_dir / "docker/utils.py"): {
+            str(work_dir / "docker/scm/utils.py"): {
                 "bind": "/app/utils.py",
                 "mode": "rw"
             }

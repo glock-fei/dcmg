@@ -1,5 +1,5 @@
 from .session import Base
-from sqlalchemy import Column, Integer, String, Float, DateTime, UniqueConstraint, Index
+from sqlalchemy import Column, Integer, String, Float, DateTime, UniqueConstraint, Index, JSON
 from datetime import datetime
 
 
@@ -25,6 +25,40 @@ class RsdmJobs(Base):
     odm_host = Column(String(255), nullable=False)
     odm_image_count = Column(Integer, nullable=False, default=0)
     odm_create_at = Column(DateTime, nullable=False, default=datetime.now())
+    progress = Column(Float, nullable=True, default=0.0)
+    state = Column(String(16), nullable=False, default="PENDING")
+    celery_task_id = Column(String(64), nullable=True)
+    err_msg = Column(String(255), nullable=True)
+    update_at = Column(DateTime, nullable=False, default=datetime.now())
+
+
+class OdmReport(Base):
+    __tablename__ = "odm_reports"
+
+    __table_args__ = (
+        UniqueConstraint("odm_project_id", "odm_task_id", "algo_name", name="uq_r_project_task_algo"),
+        Index('idx_r_project_task', 'odm_project_id', 'odm_task_id'),
+        Index("idx_r_celery_task_id", "celery_task_id")
+    )
+
+    id = Column(Integer, primary_key=True)
+    odm_project_id = Column(Integer, nullable=False)
+    odm_task_id = Column(String(64), nullable=False)
+    odm_host = Column(String(255), nullable=True)
+
+    algo_name = Column(String(64), nullable=False)
+    output_dir = Column(String(255), nullable=True)
+    log_file = Column(String(255), nullable=True)
+    orthophoto_tif = Column(String(255), nullable=True)
+    area_mu = Column(Float)
+    min_value = Column(Float)
+    max_value = Column(Float)
+    mean = Column(Float)
+    stddev = Column(Float)
+    output_files = Column(JSON)
+    class_count = Column(JSON)
+    create_at = Column(DateTime, nullable=False, default=datetime.now())
+
     progress = Column(Float, nullable=True, default=0.0)
     state = Column(String(16), nullable=False, default="PENDING")
     celery_task_id = Column(String(64), nullable=True)

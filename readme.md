@@ -54,6 +54,14 @@ dcmg/
    - Database-backed job tracking and persistence
    - Real-time progress updates
 
+5. **ODM Report Management**:
+   - Automated ODM report generation and processing
+   - Progress tracking for report uploads to OSS (Object Storage Service)
+   - Report commit to online systems with metadata
+   - Task cancellation support for report uploads
+   - Enhanced error handling and state management
+
+
 ## Requirements
 
 - Docker

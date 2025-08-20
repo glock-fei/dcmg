@@ -1,14 +1,16 @@
 import logging
 import os
-import time
+import shutil
 from enum import Enum
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Callable
 from urllib.parse import urljoin
 
 from pydantic import BaseModel
 import requests
+
+logger = logging.getLogger(__name__)
 
 
 class OdmType(Enum):
@@ -35,6 +37,51 @@ class OdmState(BaseModel):
     progress: Optional[float] = 0.00
     host: Optional[str] = None
     error: Optional[str] = None
+
+
+class OdmUploadState(BaseModel):
+    """
+    Model for ODM upload state.
+    """
+    state: Optional[str] = None
+    total_progress: dict = {}
+    error: Optional[str] = None
+    progress: Optional[float] = 0.00
+
+
+class OdmAlgoRep(BaseModel):
+    """
+    Model for ODM algorithm report.
+    """
+    project_id: int
+    task_id: str
+    odm_host: str
+    output_dir: str
+    log_file: str
+    algo_name: str
+    file_name: str
+    area_mu: float
+    report: dict
+
+
+class UploadRepTask(BaseModel):
+    """
+     Model for ODM upload report task.
+     """
+    project_id: int
+    task_id: str
+    report_no: str
+    algo_name: str = "ndvi"
+
+
+class OdmGenRep(BaseModel):
+    """
+    Model for ODM general report.
+    """
+    project_id: int
+    task_id: str
+    orthophoto_tif: str
+    odm_host: str
 
 
 class OdmJob(BaseModel):
@@ -259,3 +306,170 @@ def get_dest_folder(project_id: int, task_id: str) -> str:
         os.makedirs(dest_folder, exist_ok=True)
 
     return str(dest_folder.resolve())
+
+
+def create_odm_output_folder(project_id: int, task_id: str, remove_existing: bool = True) -> (str, str):
+    """
+    Create the output folder structure for an ODM task.
+
+    This function creates the output folder structure for an ODM task
+    and returns the absolute path to the output folder and log file.
+
+    Args:
+        project_id (int): The project ID
+        task_id (str): The task ID
+        remove_existing (bool): Whether to skip creating the output folder if it already exists
+
+    Returns:
+        str: The absolute path to the output folder
+        str: The absolute path to the log file
+
+    """
+    work_dir = Path(os.getcwd())
+    ODM_DIR = work_dir / os.getenv("STATIC_DIR", "static") / "odm"
+    OUTPUT_DIR = ODM_DIR / str(project_id) / task_id
+    LOG_FILE = OUTPUT_DIR / "app.log"
+
+    if remove_existing:
+        # Clean up existing output directory if it exists
+        if OUTPUT_DIR.exists():
+            shutil.rmtree(OUTPUT_DIR)
+
+        # Create new output directory structure and log file
+        OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+        LOG_FILE.touch()
+
+    return str(OUTPUT_DIR.resolve()), str(LOG_FILE.resolve())
+
+
+def get_content_length(url: str) -> int:
+    """
+    Get the content length of a file from a URL.
+
+    Args:
+        url (str): The URL of the file to retrieve the content length for
+    Returns:
+        int: The content length of the file in bytes
+    Raises:
+        requests.exceptions.RequestException: If the HTTP request fails
+        ValueError: If the content length is not a valid integer or is zero
+    """
+    with requests.head(url, allow_redirects=True, timeout=(10, 30)) as re:
+        re.raise_for_status()
+
+        content_length = re.headers.get("Content-Length")
+
+        if not content_length or not content_length.isdigit() or int(content_length) == 0:
+            raise ValueError("Invalid content length for all.zip file")
+
+        return int(content_length)
+
+
+def donwload_odm_all_zip(
+        odm_all_zip_url: str,
+        local_write_zip: Path,
+        total_bytes: int,
+        progress_callback: Callable[[int, int], None] = None
+) -> (str, int):
+    """
+    Download the all.zip report from the ODM server.
+    This function downloads the all.zip report from the ODM server
+    and saves it to a temporary file in the current working directory.
+
+    Args:
+        odm_all_zip_url (str): The URL of the all.zip report to download
+        local_write_zip (Path): The local file path to write the downloaded all.zip file to
+        total_bytes (int): The total size of the all.zip file in bytes
+        progress_callback (Callable[[int, int], None]): A callback function to report progress to the caller.
+    Returns:
+        str: The absolute path to the downloaded all.zip file
+        int: The size of the downloaded all.zip file in bytes
+    """
+    # Remove previous report if it exists
+    if local_write_zip.exists():
+        local_write_zip.unlink()
+
+    chunked = 0
+    # Download ODM report to local file
+    with requests.get(odm_all_zip_url, timeout=(5, 5), stream=True) as r:
+        r.raise_for_status()
+        logger.info("Downloading ODM report(app.zip) to %s", local_write_zip)
+
+        with open(local_write_zip, 'wb') as f:
+            for chunk in r.iter_content(chunk_size=100 * 1024):
+                if chunk:
+                    f.write(chunk)
+                    f.flush()
+                    chunked += len(chunk)
+                    if progress_callback:
+                        progress_callback(chunked, total_bytes)
+
+    return str(local_write_zip.resolve()), local_write_zip.stat().st_size
+
+
+def get_odm_report_output_files(project_id: int, task_id: str, output_dir: str, output_files: dict) -> list:
+    """
+    Get the output files from the ODM processing and upload them to OSS.
+    This function retrieves the output files from the ODM processing and
+    uploads them to OSS.
+
+    Args:
+        project_id (int): The project ID
+        task_id (str): The task ID
+        output_dir (str): The absolute path to the output folder
+        output_files (dict): The output files from the ODM processing. For example: {"png": "ndvi/ndvi.1755608497.5589726.png"}
+    Returns:
+        list: A list of tuples containing the local file path and the OSS path to upload to
+    """
+    _files = []
+
+    for ftype, fpath in output_files.items():
+        local_file = Path(output_dir) / fpath
+
+        # Check if output file exists
+        if not local_file.exists():
+            raise FileNotFoundError(f"Output file {local_file} does not exist")
+
+        file_size = local_file.stat().st_size
+        # Add output file to upload list
+        current_file = (ftype, local_file, f"{project_id}/{task_id}/{local_file.name}", file_size)
+        _files.append(current_file)
+
+    return _files
+
+
+def commint_report(commint_report_api: str, report_info: dict, token: str,
+                   cid: str, report_no: str, all_zip_url: str,
+                   output_files: dict):
+    """
+    Commit the ODM report to the cloud.
+    This function sends a commit request to the ODM server to commit the report to the cloud.
+
+    Args:
+        commint_report_api (str): The API endpoint URL to commit the report
+        report_info (dict): The report information to commit
+        token (str): The token to authenticate the request
+        report_no (str): The report number to commit
+        cid (str): The client ID to authenticate the request
+        all_zip_url (str): The URL of the all.zip report to commit
+        output_files (dict): The output files from the ODM processing. For example: {"png": "ndvi/ndvi.1755608497.5589726.png"}
+    """
+    with requests.post(
+            commint_report_api,
+            headers={"token": token, "cid": cid},
+            json={
+                "report_no": report_no,
+                "report_info": report_info,
+                "resource_files": {
+                    "files": [all_zip_url],
+                    "ndvi": output_files
+                }
+            },
+            timeout=(5, 5)
+    ) as r:
+        r.raise_for_status()
+
+        logger.info("Committed Cloud ODM report. Response: %s", r.text)
+        response = r.json()
+        if not isinstance(response, dict) or "code" not in response or "msg" not in response or response["code"] != 1:
+            raise Exception(r.text)

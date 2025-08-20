@@ -5,3 +5,4 @@ python-multipart==0.0.20
 docker==7.1.0
 python-dotenv==1.1.1
 celery[redis]==5.5.3
+oss2==2.19.1
