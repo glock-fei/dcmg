@@ -5,7 +5,6 @@ import time
 from datetime import datetime
 from decimal import Decimal, ROUND_DOWN
 from pathlib import Path
-from fractions import Fraction
 from typing import Union
 import oss2
 
@@ -14,7 +13,6 @@ from celery.contrib.abortable import AbortableTask, AbortableAsyncResult
 from fastapi import HTTPException
 
 from utils import (
-    remove_odm_task,
     commit_odm_task,
     OdmJobStatus,
     OdmState,
@@ -25,7 +23,7 @@ from utils import (
     commint_report
 )
 from worker.app import app
-from models import with_db_session, RsdmJobs, OdmReport
+from models import with_db_session, OdmJobs, OdmReport
 
 logger = logging.getLogger(__name__)
 
@@ -35,7 +33,7 @@ class TaskAbortedException(Exception):
     pass
 
 
-def _get_upload_progress(total_progress: dict):
+def _get_upload_progress(total_progress: dict) -> float:
     """
     Calculate the overall upload progress based on the total progress of each file.
     """
@@ -48,10 +46,10 @@ def _get_upload_progress(total_progress: dict):
         return 100.00
 
     percentage = (Decimal(uploaded_bytes_total) / Decimal(total_bytes_total)) * 100
-    return percentage.quantize(Decimal('0.01'), rounding=ROUND_DOWN)
+    return float(percentage.quantize(Decimal('0.01'), rounding=ROUND_DOWN))
 
 
-def _update_report_state(celery_task_id: str, upload_state: OdmUploadState):
+def _update_report_state(celery_task_id: str, upload_state: OdmUploadState) -> float:
     """
     Update report state in database with caching to reduce frequent writes.
     Args:
@@ -59,17 +57,20 @@ def _update_report_state(celery_task_id: str, upload_state: OdmUploadState):
         upload_state (OdmUploadState): The current state of the ODM report upload
 
     """
+    current_progress = _get_upload_progress(upload_state.total_progress)
     with with_db_session() as db:
         report: OdmReport = db.query(OdmReport).filter(OdmReport.celery_task_id == celery_task_id).first()
         if report:
             report.state = upload_state.state
             report.err_msg = upload_state.error
             report.update_at = datetime.now()
-            report.progress = _get_upload_progress(upload_state.total_progress)
+            report.progress = current_progress
 
             db.commit()
             db.refresh(report)
             logger.info("Updated ODM report state in database: %s", upload_state.dict())
+
+    return current_progress
 
 
 def _update_odm_state(celery_task_id: str, odm_state: OdmState):
@@ -81,7 +82,7 @@ def _update_odm_state(celery_task_id: str, odm_state: OdmState):
         odm_state (OdmState): The current state of the ODM job
     """
     with with_db_session() as db:
-        job: RsdmJobs = db.query(RsdmJobs).filter(RsdmJobs.celery_task_id == celery_task_id).first()
+        job: OdmJobs = db.query(OdmJobs).filter(OdmJobs.celery_task_id == celery_task_id).first()
         if job:
             job.state = odm_state.state
             job.odm_host = odm_state.host
@@ -145,7 +146,7 @@ def copy_image_to_odm(
             copied_step += 1
 
             percentage = (Decimal(copied_step) / Decimal(total_files)) * 100
-            odm_state.progress = percentage.quantize(Decimal('0.01'), rounding=ROUND_DOWN)
+            odm_state.progress = float(percentage.quantize(Decimal('0.01'), rounding=ROUND_DOWN))
 
             self.update_state(meta=odm_state.dict())
             if int(odm_state.progress) % 10 == 0:
@@ -290,7 +291,7 @@ def update_odm_report(
         odm_update_state.total_progress["commit_report"] = (5, 5)
 
         # delete temporary zip file
-        odm_all_zip.unlink()
+        local_write_zip.unlink()
     except TaskAbortedException as taex:
         logger.warning(taex)
         odm_update_state.state = OdmJobStatus.canceled.value
@@ -301,7 +302,9 @@ def update_odm_report(
         odm_update_state.error = str(e)
     finally:
         # update odm state in database and return result to celery task
-        _update_report_state(self.request.id, odm_update_state)
+        current_progress = _update_report_state(self.request.id, odm_update_state)
+        if current_progress == 100.00:
+            odm_update_state.state = OdmJobStatus.completed.value
 
         return odm_update_state.dict()
 

@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, UploadFile, HTTPException, File
 from sqlalchemy import desc
 from sqlalchemy.orm import Session, selectinload
 from starlette.responses import StreamingResponse
+from utils.translation import gettext_lazy as _
 
 from models import Job
 from models.detask import Picture

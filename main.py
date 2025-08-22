@@ -10,8 +10,10 @@ from routers.api import v1_router
 
 # load env variables
 load_dotenv(dotenv_path=".env")
+
 # create app
 app = FastAPI(title="DCMG")
+
 # mount static files
 app.mount("/static", StaticFiles(directory=os.getenv("STATIC_DIR", "static")), name="images")
 # cors middleware
@@ -24,6 +26,7 @@ app.add_middleware(
 )
 # include routers
 app.include_router(v1_router)
+
 # run app
 if __name__ == '__main__':
     uvicorn.run(

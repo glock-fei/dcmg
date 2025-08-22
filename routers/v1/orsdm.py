@@ -4,11 +4,12 @@ from datetime import datetime
 from pathlib import Path
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, status, Header
+from fastapi import APIRouter, Depends, status, Header
+from fastapi.exceptions import HTTPException
 from sqlalchemy import desc
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
-from models import RsdmJobs, OdmReport
+from models import OdmJobs, OdmReport
 from models.session import get_database
 from utils.cedoke import generate_run_id
 from utils import (
@@ -23,6 +24,7 @@ from worker.tasks import (
     generate_odm_report, update_odm_report,
     get_report_current_state
 )
+from utils.translation import gettext_lazy as _
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix='/odm')
@@ -57,7 +59,7 @@ async def get_odm_jobs(
     - **CANCELED**: The job has been canceled by the user or system
 
     ### Response
-    Returns `List[RsdmJobs]` with fields:
+    Returns `List[OdmJobs]` with fields:
     - **run_id**: Job unique identifier
     - **odm_project_id**: Related project ID
     - **odm_job_name**: Human-readable job name
@@ -87,8 +89,8 @@ async def get_odm_jobs(
     }]
     ```
     """
-    query = db.query(RsdmJobs)
-    data: list[RsdmJobs] = query.order_by(desc(RsdmJobs.id)).offset((page - 1) * limit).limit(limit).all()
+    query = db.query(OdmJobs)
+    data: list[OdmJobs] = query.order_by(desc(OdmJobs.id)).offset((page - 1) * limit).limit(limit).all()
 
     result = []
     for job in data:
@@ -99,7 +101,7 @@ async def get_odm_jobs(
 
         if not only_running:
             result.append(job)
-        elif odm_state.progress < 100:
+        elif job.state == OdmJobStatus.running.value:
             result.append(job)
     return result
 
@@ -121,7 +123,7 @@ async def create_odm_job(data: OdmJob, db: Session = Depends(get_database)):
     - **data (OdmJob)**: The ODM task configuration including folder path, project ID, task ID, and job type
 
     ### Response:
-    Returns `RsdmJobs` with fields:
+    Returns `OdmJobs` with fields:
     - **run_id**: Job unique identifier
     - **odm_project_id**: Related project ID
     - **odm_job_name**: Human-readable job name
@@ -157,12 +159,12 @@ async def create_odm_job(data: OdmJob, db: Session = Depends(get_database)):
     - **404**: No images found in the specified folder
     - **500**: Internal server error during job creation
     """
-    job: RsdmJobs = db.query(RsdmJobs).filter(RsdmJobs.odm_project_id == data.odm_project_id,
-                                              RsdmJobs.odm_task_id == data.odm_task_id).first()
+    job: OdmJobs = db.query(OdmJobs).filter(OdmJobs.odm_project_id == data.odm_project_id,
+                                            OdmJobs.odm_task_id == data.odm_task_id).first()
     if job:
-        raise HTTPException(status_code=400, detail="Task already exists,"
-                                                    " not allowed to duplicate one,"
-                                                    " please check odm server.")
+        raise HTTPException(status_code=400, detail=_("Task already exists,"
+                                                      " not allowed to duplicate one,"
+                                                      " please check odm server."))
 
     # find images in the folder
     odm_src_folder = get_src_folder(data.odm_src_folder)
@@ -173,7 +175,8 @@ async def create_odm_job(data: OdmJob, db: Session = Depends(get_database)):
         remove_odm_task(data.odm_project_id, data.odm_task_id, data.odm_host)
         # raise HTTPException
         raise HTTPException(status_code=404,
-                            detail="No images found in the specified folder. and the job has been removed from the odm.")
+                            detail=_(
+                                "No images found in the specified folder. and the job has been removed from the odm."))
     else:
         # create a new RSDM job in the database
         run_id = generate_run_id()
@@ -192,7 +195,7 @@ async def create_odm_job(data: OdmJob, db: Session = Depends(get_database)):
         logging.info("Created Celery task %s, status %s", task.id, task.status)
 
         # Create a new RSDM job record
-        new_rsdm_job = RsdmJobs(
+        new_rsdm_job = OdmJobs(
             **data.to_dict(),
             run_id=run_id,
             odm_image_count=len(images),
@@ -238,10 +241,10 @@ async def get_odm_state(project_id: int, task_id: str, db: Session = Depends(get
     }
     ```
     """
-    job: RsdmJobs = db.query(RsdmJobs).filter(RsdmJobs.odm_project_id == project_id,
-                                              RsdmJobs.odm_task_id == task_id).first()
+    job: OdmJobs = db.query(OdmJobs).filter(OdmJobs.odm_project_id == project_id,
+                                            OdmJobs.odm_task_id == task_id).first()
     if not job:
-        raise HTTPException(status_code=404, detail="Odm task not found")
+        raise HTTPException(status_code=404, detail=_("Odm task not found"))
 
     # Get the current state of the Celery task
     celery_state = get_current_state(job.celery_task_id)
@@ -268,7 +271,7 @@ async def cancel_odm_job(project_id: int, task_id: str, db: Session = Depends(ge
     - **task_id**: The task ID of the ODM task
 
     ### Response:
-    Returns `RsdmJobs` with fields:
+    Returns `OdmJobs` with fields:
     - **run_id**: Job unique identifier
     - **odm_project_id**: Related project ID
     - **odm_job_name**: Human-readable job name
@@ -281,27 +284,27 @@ async def cancel_odm_job(project_id: int, task_id: str, db: Session = Depends(ge
     - **HTTPException:** Raises 500 if th job is not removed from the celery task or the odm server.
     """
     # Query the database for the specified job
-    job: RsdmJobs = db.query(RsdmJobs).filter(RsdmJobs.odm_project_id == project_id,
-                                              RsdmJobs.odm_task_id == task_id).first()
+    job: OdmJobs = db.query(OdmJobs).filter(OdmJobs.odm_project_id == project_id,
+                                            OdmJobs.odm_task_id == task_id).first()
 
     # Raise 404 error if job is not found
     if not job:
-        raise HTTPException(status_code=404, detail="Job not found")
+        raise HTTPException(status_code=404, detail=_("Job not found"))
 
     # Check if job is in a state that cannot be cancelled
     if job.state in [OdmJobStatus.completed.value, OdmJobStatus.failed.value, OdmJobStatus.canceled.value]:
         warning_message = f"ODM task cannot be cancelled because it is in {job.state} state."
         logging.warning(warning_message)
-        raise HTTPException(status_code=400, detail=warning_message)
+        raise HTTPException(status_code=400, detail=_(warning_message))
 
     if not abort_task(celery_task_id=job.celery_task_id):
-        raise HTTPException(status_code=500, detail="Failed to cancel celery task.")
+        raise HTTPException(status_code=500, detail=_("Failed to cancel celery task."))
 
     if not remove_odm_task(project_id=project_id, task_id=task_id, base_url=job.odm_host):
-        raise HTTPException(status_code=500, detail="Failed to remove ODM task from odm server.")
+        raise HTTPException(status_code=500, detail=_("Failed to remove ODM task from odm server."))
 
     # Update job status to canceled in database
-    job.status = OdmJobStatus.canceled.value
+    job.state = OdmJobStatus.canceled.value
     job.update_at = datetime.now()
 
     db.commit()
@@ -329,16 +332,16 @@ async def remove_odm_job(project_id: int, task_id: str, db: Session = Depends(ge
 
     """
     # Query the database for the specified job
-    job: RsdmJobs = db.query(RsdmJobs).filter(RsdmJobs.odm_project_id == project_id,
-                                              RsdmJobs.odm_task_id == task_id).first()
+    job: OdmJobs = db.query(OdmJobs).filter(OdmJobs.odm_project_id == project_id,
+                                            OdmJobs.odm_task_id == task_id).first()
 
     # Raise 404 error if job is not found
     if not job:
-        raise HTTPException(status_code=404, detail="Job not found")
+        raise HTTPException(status_code=404, detail=_("Job not found"))
 
     if job.state not in [OdmJobStatus.completed.value, OdmJobStatus.failed.value, OdmJobStatus.canceled.value]:
         raise HTTPException(status_code=400,
-                            detail="ODM task must be completed, failed, or canceled before it can be removed.")
+                            detail=_("ODM task must be completed, failed, or canceled before it can be removed."))
 
     db.delete(job)
     db.commit()
@@ -373,22 +376,22 @@ async def generate_report(
     """
     # Check if the orthophoto tif file exists
     if not data.orthophoto_tif:
-        raise HTTPException(status_code=400, detail="Orthophoto tif file not provided")
+        raise HTTPException(status_code=400, detail=_("Orthophoto tif file not provided"))
 
     # Get the destination folder for the ODM task
     odm_dest_folder = get_dest_folder(data.project_id, data.task_id)
     orthophoto_tif = Path(odm_dest_folder) / "assets" / data.orthophoto_tif
     if not orthophoto_tif.exists():
         logger.error("Orthophoto tif file not found: %s", orthophoto_tif)
-        raise HTTPException(status_code=404, detail="Orthophoto tif file not found")
+        raise HTTPException(status_code=404, detail=_("Orthophoto tif file not found"))
 
     # Query the database for the specified job
-    job: RsdmJobs = db.query(RsdmJobs).filter(RsdmJobs.odm_project_id == data.project_id,
-                                              RsdmJobs.odm_task_id == data.task_id).first()
+    job: OdmJobs = db.query(OdmJobs).filter(OdmJobs.odm_project_id == data.project_id,
+                                            OdmJobs.odm_task_id == data.task_id).first()
 
     # Raise 404 error if job is not found
     if not job:
-        raise HTTPException(status_code=404, detail="Job not found")
+        raise HTTPException(status_code=404, detail=_("Job not found"))
 
     output_dir, log_file = create_odm_output_folder(project_id=data.project_id, task_id=data.task_id)
 
@@ -396,10 +399,9 @@ async def generate_report(
         "RSDM_IMAGE": os.getenv("RSDM_IMAGE"),
         "RSDM_PRIVATE_KEY": os.getenv("RSDM_PRIVATE_KEY"),
         "SERVICE_HOST_GATEWAY": os.getenv("SERVICE_HOST_GATEWAY"),
-        "ODM_REPORT_API": os.getenv("ODM_REPORT_API"),
+        "ODM_SAVE_REPORT_API": os.getenv("ODM_SAVE_REPORT_API"),
         "ODM_PROJECT_ID": data.project_id,
         "ODM_TASK_ID": data.task_id,
-        "ODM_HOST": data.odm_host,
         "OMD_OUTPUT_DIR": output_dir,
         "ODM_LOG_FILE": log_file,
         "ODM_ORTHOPHOTO_TIF": str(orthophoto_tif),
@@ -424,30 +426,65 @@ async def save_report(
     4. Updating the job status in the database to completed
 
     ### Parameters
-    - **project_id**: The project ID of the ODM task
-    - **task_id**: The task ID of the ODM task
-    - **algo_name**: The name of the algorithm used to generate the report
-    - **report**: The report generated by the algorithm
+    - **data** (OdmAlgoRep): The report data including:
+    - **project_id** (int): The project ID associated with this report
+    - **task_id** (str): The task ID associated with this report
+    - **output_dir** (str): Directory where output files are stored
+    - **log_file** (str): Path to the log file
+    - **algo_name** (str): Name of the algorithm used (e.g., "ndvi")
+    - **file_name** (str): Name of the orthophoto file
+    - **area_mu** (float): Area measurement value
+    - **report** (dict): Dictionary containing report statistics including:
+        - min, max, mean, stddev values
+        - output files list
+        - classification count data
 
     ### Returns:
     - **OdmReport:** Returns the saved report object
 
-    ### Raises:
-    - **HTTPException:** Raises 400 if the report already exists, not allowed to duplicate one, please check odm server.
-
     """
-    orp: OdmReport = db.query(OdmReport).filter(OdmReport.odm_project_id == data.project_id,
-                                                OdmReport.odm_task_id == data.task_id,
-                                                OdmReport.algo_name == data.algo_name).first()
-    if orp:
-        raise HTTPException(status_code=400, detail="The report already exists,"
-                                                    " not allowed to duplicate one,"
-                                                    " please check odm server.")
+    # Query the database for the specified job
+    job: OdmJobs = db.query(OdmJobs).filter(OdmJobs.odm_project_id == data.project_id,
+                                            OdmJobs.odm_task_id == data.task_id).first()
 
-    odm_report = OdmReport(
-        odm_project_id=data.project_id,
-        odm_task_id=data.task_id,
-        odm_host=data.odm_host,
+    # Raise 404 error if job is not found
+    if not job:
+        raise HTTPException(status_code=404, detail=_("Job not found"))
+
+    # Query the database for the specified report
+    existing_report: OdmReport = db.query(OdmReport).filter(
+        OdmReport.job_id == job.id,
+        OdmReport.algo_name == data.algo_name
+    ).first()
+
+    # If report already exists, update it
+    if existing_report:
+        existing_report.output_dir = data.output_dir
+        existing_report.log_file = data.log_file
+        existing_report.orthophoto_tif = data.file_name
+        existing_report.area_mu = data.area_mu
+        existing_report.min_value = data.report.get("min")
+        existing_report.max_value = data.report.get("max")
+        existing_report.mean = data.report.get("mean")
+        existing_report.stddev = data.report.get("stddev")
+        existing_report.output_files = data.report.get("output")
+        existing_report.class_count = data.report.get("report")
+
+        # restore the state
+        existing_report.state = OdmJobStatus.pending.value
+        existing_report.progress = 0
+        existing_report.celery_task_id = None
+        existing_report.update_at = datetime.now()
+        existing_report.err_msg = None
+
+        db.commit()
+        db.refresh(existing_report)
+
+        return existing_report
+
+    # If report does not exist, create a new one
+    new_report = OdmReport(
+        job_id=job.id,
         algo_name=data.algo_name,
         output_dir=data.output_dir,
         log_file=data.log_file,
@@ -461,11 +498,50 @@ async def save_report(
         class_count=data.report.get("report")
     )
 
-    db.add(odm_report)
+    db.add(new_report)
     db.commit()
-    db.refresh(odm_report)
+    db.refresh(new_report)
 
-    return odm_report
+    return new_report
+
+
+@router.get('/get_report_detail')
+def get_report_detail(
+        project_id: int,
+        task_id: str,
+        algo_name: str = "ndvi",
+        db: Session = Depends(get_database)
+):
+    """
+    ## Get the current state of an ODM report.
+
+    This endpoint retrieves the current state of an ODM report.
+
+    ### Parameters
+    - **project_id**: The project ID of the ODM task
+    - **task_id**: The task ID of the ODM task
+    - **algo_name**: The name of the algorithm used to generate the report
+
+    ### Response:
+    Returns `OdmReport`
+    """
+    query = db.query(OdmReport).options(selectinload(OdmReport.job)).join(OdmJobs, OdmJobs.id == OdmReport.job_id)
+    query = query.filter(OdmJobs.odm_project_id == project_id)
+    query = query.filter(OdmJobs.odm_task_id == task_id)
+    query = query.filter(OdmReport.algo_name == algo_name)
+    orp: OdmReport = query.first()
+
+    if not orp:
+        raise HTTPException(status_code=404, detail=_("Report not found, please try again later."))
+
+    # Get the current state of the Celery task
+    if orp.celery_task_id:
+        report_state = get_report_current_state(orp.celery_task_id)
+        if report_state:
+            orp.state = report_state.state
+            orp.progress = report_state.progress
+
+    return orp
 
 
 @router.get('/get_reports')
@@ -489,20 +565,22 @@ def get_reports(
     - **List[OdmReport]:** Returns a list of OdmReport objects
 
     """
-    query = db.query(OdmReport)
+    query = db.query(OdmReport).options(selectinload(OdmReport.job))
     data: list[OdmReport] = query.order_by(desc(OdmReport.id)).offset((page - 1) * limit).limit(limit).all()
 
     result = []
-    for job in data:
-        report_state = get_report_current_state(job.celery_task_id)
-        if report_state:
-            job.state = report_state.state
-            job.progress = report_state.progress
+    for rep in data:
+        # Get the current state of the Celery task
+        if rep.celery_task_id:
+            report_state = get_report_current_state(rep.celery_task_id)
+            if report_state:
+                rep.state = report_state.state
+                rep.progress = report_state.progress
 
         if not only_running:
-            result.append(job)
-        elif report_state.progress < 100:
-            result.append(job)
+            result.append(rep)
+        elif rep.state == OdmJobStatus.running.value:
+            result.append(rep)
 
     return result
 
@@ -557,18 +635,18 @@ def upload_report(
     5. Update database with final status
     """
     # Query the database for the specified report using project_id, task_id, and algo_name
-    orp: OdmReport = db.query(OdmReport).filter(
-        OdmReport.odm_project_id == data.project_id,
-        OdmReport.odm_task_id == data.task_id,
-        OdmReport.algo_name == data.algo_name
-    ).first()
+    query = db.query(OdmReport).join(OdmJobs, OdmReport.job_id == OdmJobs.id)
+    query = query.filter(OdmJobs.odm_project_id == data.project_id)
+    query = query.filter(OdmJobs.odm_task_id == data.task_id)
+    query = query.filter(OdmReport.algo_name == data.algo_name)
+    orp: OdmReport = query.first()
 
     # Raise 404 error if report is not found
     if not orp:
-        raise HTTPException(status_code=404, detail="Report not found")
+        raise HTTPException(status_code=404, detail=_("Report not found, please try again later."))
 
     if orp.state == OdmJobStatus.completed.value:
-        raise HTTPException(status_code=400, detail="Report is already uploaded.")
+        raise HTTPException(status_code=400, detail=_("Report is already uploaded."))
 
     # Prepare environment variables for OSS upload and online commit
     envs = {
@@ -588,7 +666,7 @@ def upload_report(
     celery_task = update_odm_report.delay(
         project_id=data.project_id,
         task_id=data.task_id,
-        odm_host=orp.odm_host,
+        odm_host=orp.job.odm_host,
         output_files=orp.output_files,
         output_dir=orp.output_dir,
         report_info=orp.class_count,
@@ -601,8 +679,10 @@ def upload_report(
 
     # Update the report record with the new Celery task ID and running status
     orp.celery_task_id = celery_task.id
-    orp.status = OdmJobStatus.running.value
+    orp.state = OdmJobStatus.running.value
     orp.update_at = datetime.now()
+    orp.err_msg = None
+    orp.progress = 0
 
     # Commit changes to database and refresh the report object
     db.commit()
@@ -637,15 +717,15 @@ async def cancel_upload_task(project_id: int, task_id: str, algo_name: str = "nd
     - **HTTPException:** Raises 400 if the report is not running. Cannot cancel.
     """
     # Query the database for the specified report using project_id, task_id, and algo_name
-    orp: OdmReport = db.query(OdmReport).filter(
-        OdmReport.odm_project_id == project_id,
-        OdmReport.odm_task_id == task_id,
-        OdmReport.algo_name == algo_name
-    ).first()
+    query = db.query(OdmReport).join(OdmJobs, OdmReport.job_id == OdmJobs.id)
+    query = query.filter(OdmJobs.odm_project_id == project_id)
+    query = query.filter(OdmJobs.odm_task_id == task_id)
+    query = query.filter(OdmReport.algo_name == algo_name)
+    orp: OdmReport = query.first()
 
     # Raise 404 error if report is not found
-    if not orp:
-        raise HTTPException(status_code=404, detail="Report not found")
+    if not orp or not orp.celery_task_id:
+        raise HTTPException(status_code=404, detail=_("Report not found, please try again later."))
 
     # Check if the report is running
     current_state = orp.state
@@ -655,6 +735,6 @@ async def cancel_upload_task(project_id: int, task_id: str, algo_name: str = "nd
 
     # Raise 400 error if report is not running. Cannot cancel.
     if current_state != OdmJobStatus.running.value:
-        raise HTTPException(status_code=400, detail="Report is not running. Cannot cancel.")
+        raise HTTPException(status_code=400, detail=_("Report is not running. Cannot cancel."))
 
     abort_task(celery_task_id=orp.celery_task_id)

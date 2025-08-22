@@ -42,13 +42,12 @@ def send_report_to_server(report_filename: Path):
                 if algo_name == "ndvi":
                     try:
                         res = requests.post(
-                            url=os.getenv("ODM_REPORT_API"),
+                            url=os.getenv("ODM_SAVE_REPORT_API"),
                             json={
                                 "project_id": os.getenv("ODM_PROJECT_ID"),
                                 "task_id": os.getenv("ODM_TASK_ID"),
                                 "algo_name": algo_name,
                                 "file_name": file_name,
-                                "odm_host": os.getenv("ODM_HOST"),
                                 "output_dir": os.getenv("OMD_OUTPUT_DIR"),
                                 "log_file": os.getenv("ODM_LOG_FILE"),
                                 "area_mu": area_mu,

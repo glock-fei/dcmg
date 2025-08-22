@@ -112,7 +112,7 @@ pip install -r requirements.txt
 # Pull Redis image
 docker pull redis:latest
 # Run Redis container
-docker run --name my-redis -d -p 6379:6379 redis:latest 
+docker run --name my-redis -d -p 6379:6379 --restart unless-stopped redis:latest 
 ```
 
 ## Start celery worker
@@ -138,12 +138,27 @@ alembic upgrade head
 ```
 
 ## Run the Application
+
+The project supports internationalization using Babel. To work with translations:
 ```bash
 python main.py
 # Or with uvicorn:
 uvicorn main:app --host 0.0.0.0 --port 8000 --reload
 ```
+## Internationalization
+```shell
+# Extract translatable messages
+pybabel extract -F babel.cfg -o messages.pot .
 
+# Initialize a new language (e.g., Chinese)
+pybabel init -i messages.pot -d locales -l zh_CN
+
+# Update existing translations
+pybabel update -i messages.pot -d locales -l zh_CN
+
+# Compile translations
+pybabel compile -d locales
+```
 
 # CSM - Crop Status Monitoring
 ## Project Overview

@@ -1,6 +1,6 @@
 import logging
 import os
-import shutil
+
 from enum import Enum
 from datetime import datetime
 from pathlib import Path
@@ -9,6 +9,7 @@ from urllib.parse import urljoin
 
 from pydantic import BaseModel
 import requests
+from utils.translation import gettext_lazy as _
 
 logger = logging.getLogger(__name__)
 
@@ -55,7 +56,6 @@ class OdmAlgoRep(BaseModel):
     """
     project_id: int
     task_id: str
-    odm_host: str
     output_dir: str
     log_file: str
     algo_name: str
@@ -81,7 +81,6 @@ class OdmGenRep(BaseModel):
     project_id: int
     task_id: str
     orthophoto_tif: str
-    odm_host: str
 
 
 class OdmJob(BaseModel):
@@ -308,7 +307,7 @@ def get_dest_folder(project_id: int, task_id: str) -> str:
     return str(dest_folder.resolve())
 
 
-def create_odm_output_folder(project_id: int, task_id: str, remove_existing: bool = True) -> (str, str):
+def create_odm_output_folder(project_id: int, task_id: str) -> (str, str):
     """
     Create the output folder structure for an ODM task.
 
@@ -318,7 +317,6 @@ def create_odm_output_folder(project_id: int, task_id: str, remove_existing: boo
     Args:
         project_id (int): The project ID
         task_id (str): The task ID
-        remove_existing (bool): Whether to skip creating the output folder if it already exists
 
     Returns:
         str: The absolute path to the output folder
@@ -330,14 +328,22 @@ def create_odm_output_folder(project_id: int, task_id: str, remove_existing: boo
     OUTPUT_DIR = ODM_DIR / str(project_id) / task_id
     LOG_FILE = OUTPUT_DIR / "app.log"
 
-    if remove_existing:
-        # Clean up existing output directory if it exists
-        if OUTPUT_DIR.exists():
-            shutil.rmtree(OUTPUT_DIR)
+    # todo: Docker container permission issue - cannot remove existing directories
+    #  For now, we skip the cleanup and only create new directories as needed.
+    # if remove_existing:
+    #     # Clean up existing output directory if it exists
+    #     if OUTPUT_DIR.exists():
+    #         shutil.rmtree(OUTPUT_DIR)
 
-        # Create new output directory structure and log file
+    # Create new output directory structure and log file
+    if not OUTPUT_DIR.exists():
         OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-        LOG_FILE.touch()
+
+    if LOG_FILE.exists():
+        LOG_FILE.unlink()
+
+    LOG_FILE.touch()
+    logger.info("save log to file: %s", LOG_FILE.resolve())
 
     return str(OUTPUT_DIR.resolve()), str(LOG_FILE.resolve())
 
@@ -472,4 +478,8 @@ def commint_report(commint_report_api: str, report_info: dict, token: str,
         logger.info("Committed Cloud ODM report. Response: %s", r.text)
         response = r.json()
         if not isinstance(response, dict) or "code" not in response or "msg" not in response or response["code"] != 1:
-            raise Exception(r.text)
+            raise Exception(
+                _("Committed Cloud ODM report failed. Error code: %(error_code)d, Message: %(error_message)s") % {
+                    'error_code': r.status_code,
+                    'error_message': response.get('msg', _('Unknown error'))
+                })

@@ -1,10 +1,11 @@
 from .session import Base
-from sqlalchemy import Column, Integer, String, Float, DateTime, UniqueConstraint, Index, JSON
+from sqlalchemy import Column, Integer, String, Float, DateTime, UniqueConstraint, Index, JSON, ForeignKey
+from sqlalchemy.orm import relationship
 from datetime import datetime
 
 
-class RsdmJobs(Base):
-    __tablename__ = "rsdm_jobs"
+class OdmJobs(Base):
+    __tablename__ = "odm_jobs"
 
     # Add unique constraint for odm_project_id and odm_task_id combination
     __table_args__ = (
@@ -31,20 +32,21 @@ class RsdmJobs(Base):
     err_msg = Column(String(255), nullable=True)
     update_at = Column(DateTime, nullable=False, default=datetime.now())
 
+    # Relationship to OdmReport
+    reports = relationship("OdmReport", back_populates="job")
+
 
 class OdmReport(Base):
     __tablename__ = "odm_reports"
 
     __table_args__ = (
-        UniqueConstraint("odm_project_id", "odm_task_id", "algo_name", name="uq_r_project_task_algo"),
-        Index('idx_r_project_task', 'odm_project_id', 'odm_task_id'),
+        UniqueConstraint("job_id", "algo_name", name="uq_r_project_task_algo"),
         Index("idx_r_celery_task_id", "celery_task_id")
     )
 
     id = Column(Integer, primary_key=True)
-    odm_project_id = Column(Integer, nullable=False)
-    odm_task_id = Column(String(64), nullable=False)
-    odm_host = Column(String(255), nullable=True)
+    # Foreign key relationship to OdmJobs
+    job_id = Column(Integer, ForeignKey("odm_jobs.id"), nullable=True, index=True)
 
     algo_name = Column(String(64), nullable=False)
     output_dir = Column(String(255), nullable=True)
@@ -64,3 +66,6 @@ class OdmReport(Base):
     celery_task_id = Column(String(64), nullable=True)
     err_msg = Column(String(255), nullable=True)
     update_at = Column(DateTime, nullable=False, default=datetime.now())
+
+    # Relationship back to OdmJobs
+    job = relationship("OdmJobs", back_populates="reports")
