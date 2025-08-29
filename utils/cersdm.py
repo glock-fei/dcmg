@@ -33,21 +33,21 @@ class OdmJobStatus(Enum):
     canceled = "CANCELED"
 
 
-class OdmState(BaseModel):
+class StateBase(BaseModel):
     state: Optional[str] = None
     progress: Optional[float] = 0.00
-    host: Optional[str] = None
     error: Optional[str] = None
 
 
-class OdmUploadState(BaseModel):
+class OdmState(StateBase):
+    host: Optional[str] = None
+
+
+class OdmUploadState(StateBase):
     """
     Model for ODM upload state.
     """
-    state: Optional[str] = None
     total_progress: dict = {}
-    error: Optional[str] = None
-    progress: Optional[float] = 0.00
 
 
 class OdmAlgoRep(BaseModel):
@@ -80,7 +80,7 @@ class OdmGenRep(BaseModel):
     """
     project_id: int
     task_id: str
-    orthophoto_tif: str
+    orthophoto_tif: str = "odm_orthophoto/odm_orthophoto.tif"
 
 
 class OdmJob(BaseModel):

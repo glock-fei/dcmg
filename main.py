@@ -7,12 +7,13 @@ from starlette.middleware.cors import CORSMiddleware
 from starlette.staticfiles import StaticFiles
 
 from routers.api import v1_router
+from worker.recover_tasks import recover_job_failed
 
 # load env variables
 load_dotenv(dotenv_path=".env")
 
 # create app
-app = FastAPI(title="DCMG")
+app = FastAPI(title="DCMG", lifespan=recover_job_failed)
 
 # mount static files
 app.mount("/static", StaticFiles(directory=os.getenv("STATIC_DIR", "static")), name="images")

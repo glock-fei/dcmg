@@ -32,7 +32,8 @@ celery_config = {
     },
     "task_queues": (
         Queue("default", routing_key="default"),
-        Queue("odm_report", routing_key="odm_report"),
+        # Queue("generate_odm_report", routing_key="generate_odm_report"),
+        # Queue("update_odm_report", routing_key="update_odm_report"),
     ),
 
     # Worker settings

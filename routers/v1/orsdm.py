@@ -9,7 +9,7 @@ from fastapi.exceptions import HTTPException
 from sqlalchemy import desc
 from sqlalchemy.orm import Session, selectinload
 
-from models import OdmJobs, OdmReport
+from models import OdmJobs, OdmReport, OdmGeTask
 from models.session import get_database
 from utils.cedoke import generate_run_id
 from utils import (
@@ -90,14 +90,24 @@ async def get_odm_jobs(
     ```
     """
     query = db.query(OdmJobs)
-    data: list[OdmJobs] = query.order_by(desc(OdmJobs.id)).offset((page - 1) * limit).limit(limit).all()
+    data: list[OdmJobs] = query.options(selectinload(OdmJobs.generates)).order_by(desc(OdmJobs.id)).offset((page - 1) * limit).limit(limit).all()
 
     result = []
     for job in data:
+        # check if odm task exists
         odm_state = get_current_state(job.celery_task_id)
         if odm_state:
             job.state = odm_state.state
             job.progress = odm_state.progress
+            job.error = odm_state.error
+
+        # check if generates task exists
+        if job.generates:
+            gestate = get_current_state(job.generates.celery_task_id)
+            if gestate:
+                job.generates.state = gestate.state
+                job.generates.progress = gestate.progress
+                job.generates.error = gestate.error
 
         if not only_running:
             result.append(job)
@@ -408,7 +418,36 @@ async def generate_report(
     }
 
     # start the report generation task
-    generate_odm_report.delay(envs=envs)
+    celery_task = generate_odm_report.delay(envs=envs)
+
+    # Query the database for the specified task
+    existing_task: OdmGeTask = db.query(OdmGeTask).filter(OdmGeTask.job_id == job.id).first()
+
+    if existing_task:
+        existing_task.celery_task_id = celery_task.id
+        existing_task.orthophoto_tif = str(orthophoto_tif)
+        existing_task.state = OdmJobStatus.pending.value
+        existing_task.progress = 0
+        existing_task.update_at = datetime.now()
+        existing_task.err_msg = None
+
+        db.commit()
+        db.refresh(existing_task)
+
+        return existing_task
+
+    # Create a new record in the database
+    task = OdmGeTask(
+        job_id=job.id,
+        orthophoto_tif=str(orthophoto_tif),
+        celery_task_id=celery_task.id
+    )
+
+    db.add(task)
+    db.commit()
+    db.refresh(task)
+
+    return task
 
 
 @router.post('/save_report')

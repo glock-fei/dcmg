@@ -5,6 +5,7 @@ from .cersdm import (
     find_images,
     OdmType,
     OdmJob,
+    StateBase,
     OdmJobStatus,
     OdmState,
     get_dest_folder,

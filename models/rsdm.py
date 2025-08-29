@@ -35,6 +35,27 @@ class OdmJobs(Base):
     # Relationship to OdmReport
     reports = relationship("OdmReport", back_populates="job")
 
+    # Relationship to OdmReport
+    generates = relationship("OdmGeTask", back_populates="job", uselist=False)
+
+
+class OdmGeTask(Base):
+    __tablename__ = "odm_generate_task"
+
+    id = Column(Integer, primary_key=True)
+    # Foreign key relationship to OdmJobs
+    job_id = Column(Integer, ForeignKey("odm_jobs.id"), nullable=False, unique=True, index=True)
+    orthophoto_tif = Column(String(255), nullable=True)
+
+    state = Column(String(16), nullable=False, default="PENDING")
+    progress = Column(Float, nullable=True, default=0.0)
+    celery_task_id = Column(String(64), nullable=True)
+    err_msg = Column(String(255), nullable=True)
+    update_at = Column(DateTime, nullable=False, default=datetime.now())
+
+    # Relationship back to OdmJobs
+    job = relationship("OdmJobs", back_populates="generates")
+
 
 class OdmReport(Base):
     __tablename__ = "odm_reports"

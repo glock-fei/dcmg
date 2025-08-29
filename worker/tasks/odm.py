@@ -20,10 +20,10 @@ from utils import (
     get_odm_report_output_files,
     OdmUploadState,
     get_content_length,
-    commint_report
+    commint_report, StateBase
 )
 from worker.app import app
-from models import with_db_session, OdmJobs, OdmReport
+from models import with_db_session, OdmJobs, OdmReport, OdmGeTask
 
 logger = logging.getLogger(__name__)
 
@@ -93,6 +93,26 @@ def _update_odm_state(celery_task_id: str, odm_state: OdmState):
             db.commit()
             db.refresh(job)
             logger.info("Updated ODM task state in database: %s", odm_state.dict())
+
+
+def _update_getate(celery_task_id: str, state_base: StateBase):
+    """
+    Update task progress in database with caching to reduce frequent writes.
+
+    Args:
+        celery_task_id: The Celery task ID
+        state_base (StateBase): The current state of the ODM job
+    """
+    with with_db_session() as db:
+        getask: OdmGeTask = db.query(OdmGeTask).filter_by().filter(OdmGeTask.celery_task_id == celery_task_id).first()
+        if getask:
+            getask.state = state_base.state
+            getask.err_msg = state_base.error
+            getask.update_at = datetime.now()
+
+            db.commit()
+            db.refresh(getask)
+            logger.info("Updated ODM generate task state in database: %s", state_base.dict())
 
 
 @app.task(bind=True, base=AbortableTask)
@@ -171,7 +191,7 @@ def copy_image_to_odm(
         return odm_state.dict()
 
 
-@app.task(bind=True, base=AbortableTask, queue="odm_report")
+@app.task(bind=True, base=AbortableTask, queue="update_odm_report")
 def update_odm_report(
         self,
         project_id: int,
@@ -309,8 +329,8 @@ def update_odm_report(
         return odm_update_state.dict()
 
 
-@app.task(queue="odm_report")
-def generate_odm_report(envs: dict):
+@app.task(bind=True, base=AbortableTask, queue="generate_odm_report")
+def generate_odm_report(self, envs: dict):
     """
     Generate an ODM report using a Docker container.
 
@@ -319,6 +339,7 @@ def generate_odm_report(envs: dict):
     structure, mounts volumes, and executes the report generation process.
 
     Args:
+        self: The Celery task instance
         envs (dict): Environment variables for the Docker container, including:
             - RSDM_IMAGE: The Docker image to use for report generation
             - ODM_PROJECT_ID: The ODM project ID
@@ -345,51 +366,68 @@ def generate_odm_report(envs: dict):
         - Mount necessary volumes for input, output, logs, and configuration files
         - Connect to the host network via extra_hosts configuration
     """
-    work_dir = Path(os.getcwd())
-    OUTPUT_DIR = Path(envs.get("OMD_OUTPUT_DIR"))
-    logger.info("Starting ODM report generation, source directory: %s, output directory: %s",
-                envs.get("ODM_ORTHOPHOTO_TIF"), OUTPUT_DIR)
-    # Initialize Docker client
-    client = docker.from_env()
+    state_base = StateBase(state=OdmJobStatus.running.value)
 
-    # Run the RSDM Docker container to generate the report
-    client.containers.run(
-        stderr=True,
-        stdout=True,
-        image=envs.get("RSDM_IMAGE"),
-        command=["/bin/bash", "-c", "cp -r /media/* /app/images/ && ./start"],
-        environment=envs,
-        extra_hosts={
-            envs.get("SERVICE_HOST_GATEWAY"): "host-gateway"
-        },
-        remove=True,  # Automatically remove container when it exits
-        volumes={
-            str(Path(envs.get("ODM_ORTHOPHOTO_TIF")).absolute()): {
-                "bind": "/media/odm_orthophoto.tif",
-                "mode": "ro"  # Read-only mount for input orthophoto
+    try:
+        work_dir = Path(os.getcwd())
+        OUTPUT_DIR = Path(envs.get("OMD_OUTPUT_DIR"))
+        logger.info("Starting ODM report generation, source directory: %s, output directory: %s",
+                    envs.get("ODM_ORTHOPHOTO_TIF"), OUTPUT_DIR)
+        # Initialize Docker client
+        client = docker.from_env()
+
+        # Update state
+        self.update_state(meta=state_base.dict())
+
+        # Run the RSDM Docker container to generate the report
+        client.containers.run(
+            stderr=True,
+            stdout=True,
+            image=envs.get("RSDM_IMAGE"),
+            command=["/bin/bash", "-c", "cp -r /media/* /app/images/ && ./start"],
+            environment=envs,
+            extra_hosts={
+                envs.get("SERVICE_HOST_GATEWAY"): "host-gateway"
             },
-            envs.get("ODM_LOG_FILE"): {
-                "bind": "/app/app.log",
-                "mode": "rw"  # Read-write mount for log file
-            },
-            str(OUTPUT_DIR.absolute()): {
-                "bind": "/app/images/output",
-                "mode": "rw"  # Read-write mount for output directory
-            },
-            str(work_dir / "docker/rsdm/algos.json"): {
-                "bind": "/app/algos.json",
-                "mode": "rw"  # Read-write mount for algorithms configuration
-            },
-            str(work_dir / "docker/rsdm/license"): {
-                "bind": "/app/license",
-                "mode": "ro"  # Read-only mount for license file
-            },
-            str(work_dir / "docker/rsdm/utils.py"): {
-                "bind": "/app/utils.py",
-                "mode": "rw"
+            remove=True,  # Automatically remove container when it exits
+            volumes={
+                str(Path(envs.get("ODM_ORTHOPHOTO_TIF")).absolute()): {
+                    "bind": "/media/odm_orthophoto.tif",
+                    "mode": "ro"  # Read-only mount for input orthophoto
+                },
+                envs.get("ODM_LOG_FILE"): {
+                    "bind": "/app/app.log",
+                    "mode": "rw"  # Read-write mount for log file
+                },
+                str(OUTPUT_DIR.absolute()): {
+                    "bind": "/app/images/output",
+                    "mode": "rw"  # Read-write mount for output directory
+                },
+                str(work_dir / "docker/rsdm/algos.json"): {
+                    "bind": "/app/algos.json",
+                    "mode": "rw"  # Read-write mount for algorithms configuration
+                },
+                str(work_dir / "docker/rsdm/license"): {
+                    "bind": "/app/license",
+                    "mode": "ro"  # Read-only mount for license file
+                },
+                str(work_dir / "docker/rsdm/utils.py"): {
+                    "bind": "/app/utils.py",
+                    "mode": "rw"
+                }
             }
-        }
-    )
+        )
+        logger.info("ODM report generation complete.")
+        state_base.state = OdmJobStatus.completed.value
+    except Exception as e:
+        logger.error("Failed to generate ODM report: %s", e)
+        state_base.state = OdmJobStatus.failed.value
+        state_base.error = str(e)
+    finally:
+        # update odm state in database and return result to celery task
+        _update_getate(self.request.id, state_base)
+
+        return state_base.dict()
 
 
 def abort_task(celery_task_id: str) -> bool:
@@ -426,12 +464,16 @@ def get_current_state(celery_task_id: str) -> Union[OdmState, None]:
         the current state of the ODM job as an OdmState object, or None if the task is not found.
     """
     current_state = None
-    task = AbortableAsyncResult(celery_task_id)
+    try:
+        task = AbortableAsyncResult(celery_task_id)
 
-    if task.name and task.worker:
-        current_state = OdmState(**task.result) if task.result else OdmState(state=task.state)
-
-    return current_state
+        if task.name and task.worker:
+            current_state = OdmState(**task.result) if task.result else OdmState(state=task.state)
+    except ValueError as e:
+        logger.error("Failed to get task result: %s", str(e))
+        pass
+    finally:
+        return current_state
 
 
 def get_report_current_state(celery_task_id: str) -> Union[OdmUploadState, None]:
@@ -443,10 +485,14 @@ def get_report_current_state(celery_task_id: str) -> Union[OdmUploadState, None]
         the current state of the ODM job as an OdmState object, or None if the task is not found.
     """
     current_state = None
-    task = AbortableAsyncResult(celery_task_id)
+    try:
+        task = AbortableAsyncResult(celery_task_id)
 
-    if task.name and task.worker and task.result:
-        current_state = OdmUploadState(**task.result)
-        current_state.progress = _get_upload_progress(current_state.total_progress)
-
-    return current_state
+        if task.name and task.worker and task.result:
+            current_state = OdmUploadState(**task.result)
+            current_state.progress = _get_upload_progress(current_state.total_progress)
+    except ValueError as e:
+        logger.error("Failed to get task result: %s", str(e))
+        pass
+    finally:
+        return current_state
