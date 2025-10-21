@@ -209,7 +209,7 @@ def start_scm_job_container(
         OSS_BUCKET: str, the bucket of the oss.
         OSS_ENDPOINT: str, the endpoint of the oss.
         OSS_REGION: str, the region of the oss.
-        OSS_DOAMIN: str, the domain of the oss.
+        OSS_DOMAIN: str, the domain of the oss.
         OSS_UPLOAD_KEY: str, the key to upload the output images to the oss.
     """
     CONTAINER_OUTPUT_DIR = "/app/output"
@@ -247,7 +247,7 @@ def start_scm_job_container(
             "OSS_BUCKET": os.getenv("OSS_BUCKET"),
             "OSS_ENDPOINT": os.getenv("OSS_ENDPOINT"),
             "OSS_REGION": os.getenv("OSS_REGION"),
-            "OSS_DOAMIN": os.getenv("OSS_DOAMIN"),
+            "OSS_DOMAIN": os.getenv("OSS_DOMAIN"),
             "OSS_UPLOAD_KEY": os.getenv("OSS_UPLOAD_KEY")
         },
         extra_hosts={

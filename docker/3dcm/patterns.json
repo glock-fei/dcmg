@@ -1,0 +1,102 @@
+{
+    "OssForbiddenError": {
+        "pattern": "(error|status|http|response).*403|403.*(error|status|http|response)|Forbidden|AccessDenied|InvalidAccessKeyId",
+        "message": "无法访问云存储，请联系开发人员检查后重试。",
+        "level": "ERROR"
+    },
+    "OssNotFoundError": {
+        "pattern": "(error|failed|exception).*404|(404|Not Found|NoSuchKey).*(error|failed|exception)",
+        "message": "数据集不存在，请重新上传。",
+        "level": "ERROR"
+    },
+    "OssTimeoutError": {
+        "pattern": "timeout.*error|Connection timed out|RequestTimeout.*error|no such host",
+        "message": "服务器网络不稳定，请稍后重试。",
+        "level": "WARNING"
+    },
+    "OutOfMemoryError": {
+        "pattern": "OutOfMemory|out of memory.*error|MemoryError|killed.*memory|OOM.*error",
+        "message": "处理数据量太大，请减少图片数量或等待服务器空闲时有更大内存再重试。",
+        "level": "CRITICAL"
+    },
+    "ColmapNoFeaturesError": {
+        "pattern": "\\[COLMAP\\] E.*No features|\\[COLMAP\\] E.*insufficient features|\\[COLMAP\\] E.*too few features|\\[COLMAP\\] E.*Failed to create feature extractor",
+        "message": "特征提取失败，图片太模糊或缺少纹理，请使用更清晰的图片。",
+        "level": "ERROR"
+    },
+    "ColmapNoMatchesError": {
+        "pattern": "\\[COLMAP\\] E.*No images with matches|\\[COLMAP\\] E.*No matches|\\[COLMAP\\] E.*insufficient matches|\\[COLMAP\\] E.*too few matches",
+        "message": "图片之间角度差异太大，请增加重叠区域后重试。",
+        "level": "ERROR"
+    },
+    "ColmapRegistrationFailedError": {
+        "pattern": "\\[COLMAP\\] E.*failed to create sparse model|\\[COLMAP\\] E.*Failed to register|\\[COLMAP\\] E.*Registration failed|\\[COLMAP\\] E.*No valid reconstruction",
+        "message": "无法生成三维模型，请改善图片质量或增加图片数量。",
+        "level": "ERROR"
+    },
+    "ColmapBundleAdjustmentError": {
+        "pattern": "\\[COLMAP\\] E.*Need at least one registered frame|\\[COLMAP\\] E.*Need at least two images",
+        "message": "图片数量不足，需要至少二十张不同角度的图片。",
+        "level": "ERROR"
+    },
+    "BackgroundRemovalError": {
+        "pattern": "rmbg.*error|background removal.*failed|BiRefNet.*error|Failed to create feature extractor.*BiRefNet|Invalid.*backbone.*BiRefNet",
+        "message": "背景移除失败，请稍后重试。",
+        "level": "ERROR"
+    },
+    "PotreeConversionError": {
+        "pattern": "Potree.*error|conversion.*failed|Invalid point cloud.*error|PotreeConverter.*error|ERROR.*PotreeConverter",
+        "message": "三维数据转换失败，请稍后重试。",
+        "level": "ERROR"
+    },
+    "FileNotFoundError": {
+        "pattern": "No such file.*error|File not found.*error|FileNotFoundError",
+        "message": "云端文件查找异常，请联系开发人员检查后重试。",
+        "level": "ERROR"
+    },
+    "PermissionDeniedError": {
+        "pattern": "Permission denied.*error|PermissionError",
+        "message": "云端文件生成异常，请联系开发人员检查后重试。",
+        "level": "ERROR"
+    },
+    "TorchRuntimeError": {
+        "pattern": "RuntimeError.*torch|RuntimeError.*CUDA|RuntimeError.*device|RuntimeError.*tensor",
+        "message": "三维数据处理异常，GPU/CPU计算异常或内存不足，请稍后重试。",
+        "level": "ERROR"
+    },
+    "EmptyPointCloudError": {
+        "pattern": "empty.*point.*cloud|no.*points.*found|point.*cloud.*is.*empty|Plant.*point.*cloud.*is.*empty",
+        "message": "三维表型提取失败，请检查图片质量，避免图像模糊、曝光过度或不足。",
+        "level": "ERROR"
+    },
+    "UnzipError": {
+        "pattern": "unzip.*error|unzip.*failed|unzip.*cannot|cannot.*unzip|Archive.*corrupted|Invalid.*archive|Bad.*zip.*file|unzip.*permission.*denied|unzip.*No.*such.*file|End-of-central-directory.*signature.*not.*found",
+        "message": "云端资源文件解压异常，请检查压缩包是否损坏，再重试。",
+        "level": "ERROR"
+    },
+    "DockerContainerNotFoundError": {
+        "pattern": "can not get logs from container which is dead or marked for removal|Client Error.*container.*not found|Conflict.*container.*dead or marked for removal|No such container",
+        "message": "运行时异常，容器被强制断开，请重启电脑后再重试。",
+        "level": "ERROR"
+    },
+    "DockerContainerAbortedError": {
+        "pattern": "TaskRevokedError|Task was canceled by user|task.*revoked|task.*aborted",
+        "message": "任务已被用户中止。",
+        "level": "WARNING"
+    },
+    "DockerContainerExitError": {
+        "pattern": "Docker container exited with non-zero exit code|container.*exit.*code.*[1-9]",
+        "message": "运行时异常，容器执行过程中发生错误，请重启电脑后再重试。",
+        "level": "ERROR"
+    },
+    "Open3DMeshNotWatertightError": {
+        "pattern": "Open3D Error.*The mesh is not watertight, and the volume cannot be computed|mesh is not watertight",
+        "message": "三维表型提取失败，请改善图片质量或增加图片数量再重试。",
+        "level": "ERROR"
+    },
+    "CudaNotFoundError": {
+        "pattern": "Found no NVIDIA driver on your system|CUDA out of memory|CUDA error|no NVIDIA GPU",
+        "message": "系统未检测到NVIDIA GPU或驱动程序，请重启电脑后再重试。",
+        "level": "ERROR"
+    }
+}

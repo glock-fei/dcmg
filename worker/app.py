@@ -1,12 +1,13 @@
 import os
 from kombu import Queue
 from celery import Celery
-
+from dotenv import load_dotenv
 
 # @setup_logging.connect
 # def config_loggers(*args, **kwargs):
 #     logging.config.fileConfig('logs/conf.ini', disable_existing_loggers=False)
 
+load_dotenv(dotenv_path=".env")
 
 app = Celery(__name__)
 

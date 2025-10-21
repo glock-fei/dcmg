@@ -27,6 +27,7 @@ class OdmJobStatus(Enum):
     Model for ODM job status.
     """
     pending = "PENDING"
+    uploading = "UPLOADING"
     running = "RUNNING"
     completed = "COMPLETED"
     failed = "FAILED"

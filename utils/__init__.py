@@ -18,5 +18,6 @@ from .cersdm import (
     OdmUploadState,
     get_content_length,
     commint_report,
-    UploadRepTask
+    UploadRepTask,
 )
+from .cevdcm import Vdcm, JobType, ErrorLevel, LogEntry, ErrorLogAnalyzer

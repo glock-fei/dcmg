@@ -64,7 +64,7 @@ def upload_image_to_oss(job_id: str):
                 bucket.put_object_from_file(oss_images_url, image_local_path)
                 log.info("Upload successed: %s", image_local_path)
 
-                return os.getenv("OSS_DOAMIN") + oss_images_url
+                return os.getenv("OSS_DOMAIN") + oss_images_url
 
             except (oss2.exceptions.OssError, ValueError, FileNotFoundError, Exception) as ose:
                 log.error("Upload image to oss failed: %s", ose)

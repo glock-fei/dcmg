@@ -229,7 +229,7 @@ def update_odm_report(
     odm_update_state = OdmUploadState(state=OdmJobStatus.running.value, total_progress={})
 
     try:
-        OSS_DOMAIN = envs.get("OSS_DOAMIN").rstrip("/")
+        OSS_DOMAIN = envs.get("OSS_DOMAIN").rstrip("/")
         OSS_UPLOAD_KEY = envs.get("OSS_UPLOAD_KEY").rstrip("/")
         # Initialize OSS client with credentials
         bucket = oss2.Bucket(

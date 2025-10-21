@@ -68,10 +68,15 @@ celery -A worker.app worker -l info -Q default -n cpworker@%h -c 1 \
     --pidfile="${PID_DIR}/cpworker.pid" >> "$MAIN_LOG" 2>> "$ERROR_LOG" &
 CPWORKER_PID=$!
 
+celery -A worker.app worker -l info -Q reconstruction -n reconworker@%h -c 1 \
+    --pidfile="${PID_DIR}/reconworker.pid" >> "$MAIN_LOG" 2>> "$ERROR_LOG" &
+REWORKER_PID=$!
+
 # Store PIDs for cleanup
 echo $GEWORKER_PID > "${PID_DIR}/geworker.pid"
 echo $UPWORKER_PID > "${PID_DIR}/upworker.pid"
 echo $CPWORKER_PID > "${PID_DIR}/cpworker.pid"
+echo $REWORKER_PID > "${PID_DIR}/reconworker.pid"
 
 # Wait a moment for workers to start
 sleep 5
