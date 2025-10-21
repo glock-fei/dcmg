@@ -7,7 +7,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: PROJECT VERSION\n"
 "Report-Msgid-Bugs-To: EMAIL@ADDRESS\n"
-"POT-Creation-Date: 2025-08-21 22:15+0800\n"
+"POT-Creation-Date: 2025-10-21 17:37+0800\n"
 "PO-Revision-Date: 2025-08-21 13:12+0800\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language: zh_Hans_CN\n"
@@ -18,66 +18,103 @@ msgstr ""
 "Content-Transfer-Encoding: 8bit\n"
 "Generated-By: Babel 2.17.0\n"
 
-#: routers/v1/orsdm.py:165
+#: routers/v1/orsdm.py:175
 msgid ""
 "Task already exists, not allowed to duplicate one, please check odm "
 "server."
 msgstr "任务已存在，不允许重复创建，请检查ODM服务器。"
 
-#: routers/v1/orsdm.py:179
+#: routers/v1/orsdm.py:189
 msgid ""
 "No images found in the specified folder. and the job has been removed "
 "from the odm."
 msgstr "在指定文件夹中未找到图像文件，该任务已从ODM服务器移除。"
 
-#: routers/v1/orsdm.py:247
+#: routers/v1/orsdm.py:257
 msgid "Odm task not found"
 msgstr "未找到ODM任务"
 
-#: routers/v1/orsdm.py:292 routers/v1/orsdm.py:340 routers/v1/orsdm.py:394
-#: routers/v1/orsdm.py:452
+#: routers/v1/orsdm.py:302 routers/v1/orsdm.py:350 routers/v1/orsdm.py:404
+#: routers/v1/orsdm.py:491
 msgid "Job not found"
 msgstr "未找到任务"
 
-#: routers/v1/orsdm.py:301
+#: routers/v1/orsdm.py:311 routers/v1/vdcm.py:249
 msgid "Failed to cancel celery task."
 msgstr "取消Celery任务失败"
 
-#: routers/v1/orsdm.py:304
+#: routers/v1/orsdm.py:314
 msgid "Failed to remove ODM task from odm server."
 msgstr "从ODM服务器移除任务失败"
 
-#: routers/v1/orsdm.py:344
+#: routers/v1/orsdm.py:354
 msgid "ODM task must be completed, failed, or canceled before it can be removed."
 msgstr "ODM任务必须处于完成、失败或已取消状态才能被移除"
 
-#: routers/v1/orsdm.py:379
+#: routers/v1/orsdm.py:389
 msgid "Orthophoto tif file not provided"
 msgstr "未提供正射影像tif文件"
 
-#: routers/v1/orsdm.py:386
+#: routers/v1/orsdm.py:396
 msgid "Orthophoto tif file not found"
 msgstr "未找到正射影像tif文件"
 
-#: routers/v1/orsdm.py:535 routers/v1/orsdm.py:646 routers/v1/orsdm.py:726
+#: routers/v1/orsdm.py:574 routers/v1/orsdm.py:685 routers/v1/orsdm.py:767
 msgid "Report not found, please try again later."
 msgstr "报告尚未生成，请稍后再试"
 
-#: routers/v1/orsdm.py:649
+#: routers/v1/orsdm.py:688
 msgid "Report is already uploaded."
 msgstr "报告已上传"
 
-#: routers/v1/orsdm.py:736
+#: routers/v1/orsdm.py:777
 msgid "Report is not running. Cannot cancel."
 msgstr "报告未在运行中，无法取消"
 
-#: utils/cersdm.py:482
+#: routers/v1/vdcm.py:70
+#, python-format
+msgid "Task with no %(no)s already exists. Duplicate tasks are not allowed."
+msgstr "编号为 %(no)s 的任务已存在。不允许创建重复任务。"
+
+#: routers/v1/vdcm.py:75
+msgid "Source file does not exist."
+msgstr "源文件不存在。"
+
+#: routers/v1/vdcm.py:145 routers/v1/vdcm.py:243 routers/v1/vdcm.py:290
+#: routers/v1/vdcm.py:358
+#, python-format
+msgid "Task with no %(no)s does not exist."
+msgstr "编号为 %(no)s 的任务不存在。"
+
+#: routers/v1/vdcm.py:246
+#, python-format
+msgid "Task with no %(no)s is not running."
+msgstr "编号为 %(no)s 的任务未在运行。"
+
+#: routers/v1/vdcm.py:294
+#, python-format
+msgid "Task with no %(no)s is still running, cannot remove."
+msgstr "编号为 %(no)s 的任务仍在运行中，无法移除。"
+
+#: routers/v1/vdcm.py:362
+#, python-format
+msgid "Task with no %(no)s is not completed, cannot upload report."
+msgstr "编号为 %(no)s 的任务未完成，无法上传报告。"
+
+#: routers/v1/vdcm.py:366
+#, python-format
+msgid ""
+"Report upload for task with no %(no)s is already in progress, cannot "
+"upload again."
+msgstr "编号为 %(no)s 的任务报告已在上传中，无法再次上传。"
+
+#: utils/cersdm.py:483
 #, python-format
 msgid ""
 "Committed Cloud ODM report failed. Error code: %(error_code)d, Message: "
 "%(error_message)s"
 msgstr "提交云端ODM报告失败。错误代码：%(error_code)d，错误信息：%(error_message)s"
 
-#: utils/cersdm.py:484
+#: utils/cersdm.py:485
 msgid "Unknown error"
 msgstr "未知错误"

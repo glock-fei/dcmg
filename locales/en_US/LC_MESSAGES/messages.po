@@ -7,7 +7,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: PROJECT VERSION\n"
 "Report-Msgid-Bugs-To: EMAIL@ADDRESS\n"
-"POT-Creation-Date: 2025-08-21 22:15+0800\n"
+"POT-Creation-Date: 2025-10-21 17:37+0800\n"
 "PO-Revision-Date: 2025-08-21 14:30+0800\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language: en_US\n"
@@ -18,66 +18,113 @@ msgstr ""
 "Content-Transfer-Encoding: 8bit\n"
 "Generated-By: Babel 2.17.0\n"
 
-#: routers/v1/orsdm.py:165
+#: routers/v1/orsdm.py:175
 msgid ""
 "Task already exists, not allowed to duplicate one, please check odm "
 "server."
-msgstr "Task already exists. Duplicate tasks are not allowed. Please check the ODM server."
+msgstr ""
+"Task already exists. Duplicate tasks are not allowed. Please check the "
+"ODM server."
 
-#: routers/v1/orsdm.py:179
+#: routers/v1/orsdm.py:189
 msgid ""
 "No images found in the specified folder. and the job has been removed "
 "from the odm."
-msgstr "No images found in the specified folder. The job has been removed from the ODM server."
+msgstr ""
+"No images found in the specified folder. The job has been removed from "
+"the ODM server."
 
-#: routers/v1/orsdm.py:247
+#: routers/v1/orsdm.py:257
 msgid "Odm task not found"
 msgstr "ODM task not found"
 
-#: routers/v1/orsdm.py:292 routers/v1/orsdm.py:340 routers/v1/orsdm.py:394
-#: routers/v1/orsdm.py:452
+#: routers/v1/orsdm.py:302 routers/v1/orsdm.py:350 routers/v1/orsdm.py:404
+#: routers/v1/orsdm.py:491
 msgid "Job not found"
 msgstr "Job not found"
 
-#: routers/v1/orsdm.py:301
+#: routers/v1/orsdm.py:311 routers/v1/vdcm.py:249
 msgid "Failed to cancel celery task."
 msgstr "Failed to cancel the Celery task"
 
-#: routers/v1/orsdm.py:304
+#: routers/v1/orsdm.py:314
 msgid "Failed to remove ODM task from odm server."
 msgstr "Failed to remove the ODM task from the ODM server"
 
-#: routers/v1/orsdm.py:344
+#: routers/v1/orsdm.py:354
 msgid "ODM task must be completed, failed, or canceled before it can be removed."
-msgstr "The ODM task must be completed, failed, or canceled before it can be removed"
+msgstr ""
+"The ODM task must be completed, failed, or canceled before it can be "
+"removed"
 
-#: routers/v1/orsdm.py:379
+#: routers/v1/orsdm.py:389
 msgid "Orthophoto tif file not provided"
 msgstr "Orthophoto TIFF file not provided"
 
-#: routers/v1/orsdm.py:386
+#: routers/v1/orsdm.py:396
 msgid "Orthophoto tif file not found"
 msgstr "Orthophoto TIFF file not found"
 
-#: routers/v1/orsdm.py:535 routers/v1/orsdm.py:646 routers/v1/orsdm.py:726
+#: routers/v1/orsdm.py:574 routers/v1/orsdm.py:685 routers/v1/orsdm.py:767
 msgid "Report not found, please try again later."
 msgstr "Report not found. Please try again later."
 
-#: routers/v1/orsdm.py:649
+#: routers/v1/orsdm.py:688
 msgid "Report is already uploaded."
 msgstr "Report has already been uploaded"
 
-#: routers/v1/orsdm.py:736
+#: routers/v1/orsdm.py:777
 msgid "Report is not running. Cannot cancel."
 msgstr "Report is not running. Cannot be canceled"
 
-#: utils/cersdm.py:482
+#: routers/v1/vdcm.py:70
+#, python-format
+msgid "Task with no %(no)s already exists. Duplicate tasks are not allowed."
+msgstr "Task with ID %(no)s already exists. Duplicate tasks are not allowed."
+
+#: routers/v1/vdcm.py:75
+msgid "Source file does not exist."
+msgstr "Source file does not exist."
+
+#: routers/v1/vdcm.py:145 routers/v1/vdcm.py:243 routers/v1/vdcm.py:290
+#: routers/v1/vdcm.py:358
+#, python-format
+msgid "Task with no %(no)s does not exist."
+msgstr "Task with ID %(no)s does not exist."
+
+#: routers/v1/vdcm.py:246
+#, python-format
+msgid "Task with no %(no)s is not running."
+msgstr "Task with ID %(no)s is not running."
+
+#: routers/v1/vdcm.py:294
+#, python-format
+msgid "Task with no %(no)s is still running, cannot remove."
+msgstr "Task with ID %(no)s is still running and cannot be removed."
+
+#: routers/v1/vdcm.py:362
+#, python-format
+msgid "Task with no %(no)s is not completed, cannot upload report."
+msgstr "Task with ID %(no)s is not completed. Cannot upload report."
+
+#: routers/v1/vdcm.py:366
+#, python-format
+msgid ""
+"Report upload for task with no %(no)s is already in progress, cannot "
+"upload again."
+msgstr ""
+"Report upload for task with ID %(no)s is already in progress. Cannot "
+"upload again."
+
+#: utils/cersdm.py:483
 #, python-format
 msgid ""
 "Committed Cloud ODM report failed. Error code: %(error_code)d, Message: "
 "%(error_message)s"
-msgstr "Failed to commit Cloud ODM report. Error code: %(error_code)d, Message: %(error_message)s"
+msgstr ""
+"Failed to commit Cloud ODM report. Error code: %(error_code)d, Message: "
+"%(error_message)s"
 
-#: utils/cersdm.py:484
+#: utils/cersdm.py:485
 msgid "Unknown error"
 msgstr "Unknown error"
