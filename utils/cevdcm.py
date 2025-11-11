@@ -155,3 +155,4 @@ if __name__ == '__main__':
     analyzer = ErrorLogAnalyzer("../docker/3dcm/patterns.json")
     analyzer.parse_log_file('app.log')
     print(analyzer.entries)
+    
