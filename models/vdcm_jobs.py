@@ -9,7 +9,7 @@ class VdcmJobs(Base):
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     no = Column(String(32), nullable=False, unique=True, index=True)
-    title = Column(String(255), nullable=True)
+    title:  Column = Column(String(255), nullable=True)
     job_type = Column(String(16), nullable=False)
     src_path = Column(String(255), nullable=False)
     dest_path = Column(String(255), nullable=False)
@@ -28,7 +28,7 @@ class VdcmJobs(Base):
     reports = Column(JSON, nullable=True)
 
     progress = Column(Float, nullable=True, default=0.0)
-    state = Column(String(16), nullable=False, default="PENDING")
+    state: Column = Column(String(16), nullable=False, default="PENDING")
     celery_task_id = Column(String(64), nullable=True)
     container_id = Column(String(64), nullable=True)
     update_at = Column(DateTime, nullable=False, default=datetime.now())

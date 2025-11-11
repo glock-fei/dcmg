@@ -1,3 +1,4 @@
+import json
 import logging
 import os
 import shutil
@@ -5,23 +6,12 @@ import time
 from datetime import datetime
 from decimal import Decimal, ROUND_DOWN
 from pathlib import Path
-from typing import Union
-import oss2
+from typing import Union, Optional
 
 import docker
 from celery.contrib.abortable import AbortableTask, AbortableAsyncResult
 from fastapi import HTTPException
-
-from utils import (
-    commit_odm_task,
-    OdmJobStatus,
-    OdmState,
-    donwload_odm_all_zip,
-    get_odm_report_output_files,
-    OdmUploadState,
-    get_content_length,
-    commint_report, StateBase
-)
+import utils
 from worker.app import app
 from models import with_db_session, OdmJobs, OdmReport, OdmGeTask
 
@@ -49,7 +39,7 @@ def _get_upload_progress(total_progress: dict) -> float:
     return float(percentage.quantize(Decimal('0.01'), rounding=ROUND_DOWN))
 
 
-def _update_report_state(celery_task_id: str, upload_state: OdmUploadState) -> float:
+def _update_report_state(celery_task_id: str, upload_state: utils.OdmUploadState) -> float:
     """
     Update report state in database with caching to reduce frequent writes.
     Args:
@@ -73,7 +63,7 @@ def _update_report_state(celery_task_id: str, upload_state: OdmUploadState) -> f
     return current_progress
 
 
-def _update_odm_state(celery_task_id: str, odm_state: OdmState):
+def _update_odm_state(celery_task_id: str, odm_state: utils.OdmState):
     """
     Update task progress in database with caching to reduce frequent writes.
 
@@ -95,7 +85,7 @@ def _update_odm_state(celery_task_id: str, odm_state: OdmState):
             logger.info("Updated ODM task state in database: %s", odm_state.dict())
 
 
-def _update_getate(celery_task_id: str, state_base: StateBase):
+def _update_getate(celery_task_id: str, state_base: utils.StateBase):
     """
     Update task progress in database with caching to reduce frequent writes.
 
@@ -121,8 +111,10 @@ def copy_image_to_odm(
         project_id: int,
         task_id: str,
         base_url: str,
-        odm_dest_folder: Union[Path, str],
-        images: []
+        odm_dest_folder: str,
+        images: [],
+        reflector_dest_dir: str,
+        radiometric: Optional[list[list[dict]]]
 ):
     """
     Copy images to the ODM media directory for processing.
@@ -136,8 +128,10 @@ def copy_image_to_odm(
         project_id (int): The ID of the project the images belong to
         task_id (str): The task identifier for the ODM job
         base_url (str): The base URL of the odm host
-        odm_dest_folder (Union[Path, str]): The destination folder on the ODM server
+        odm_dest_folder (str): The destination folder on the ODM server
         images (list): List of image file paths to copy
+        reflector_dest_dir (str): The reflector directory on the ODM server
+        radiometric (Optional[list[list[dict]]]): List of radiometric data for each image
 
     Process:
         1. Resolves the target directory path
@@ -147,17 +141,20 @@ def copy_image_to_odm(
         5. Automatically commits job when complete
     """
     total_files = len(images)
+    celery_task_id = self.request.id
     copied_step = 0
-    odm_state = OdmState(state=OdmJobStatus.running.value, host=base_url)
+    odm_state = utils.OdmState(state=utils.OdmJobStatus.running.value, host=base_url)
 
     try:
+        # Process radiometric data if present
+        _process_radiometric_data(celery_task_id, radiometric, Path(reflector_dest_dir))
         # copy each image to target directory
         for img in images:
             if self.is_aborted():
                 msg = "Task aborted by user."
                 logger.info(msg)
                 # set celery task state to canceled and update progress cache
-                odm_state.state = OdmJobStatus.canceled.value
+                odm_state.state = utils.OdmJobStatus.canceled.value
                 odm_state.error = msg
                 break
 
@@ -175,33 +172,34 @@ def copy_image_to_odm(
             time.sleep(0.3)
     except Exception as e:
         logger.error("Error copying image: %s", e)
-        odm_state.state = OdmJobStatus.failed.value
+        odm_state.state = utils.OdmJobStatus.failed.value
         odm_state.error = str(e)
     finally:
         if copied_step == total_files:
             logger.info("All images copied successfully.")
             # set celery task state to completed and update progress cache
-            odm_state.state = OdmJobStatus.completed.value
+            odm_state.state = utils.OdmJobStatus.completed.value
             odm_state.progress = 100.00
             # callback to ODM to commit job
-            commit_odm_task(project_id, task_id, base_url)
+            utils.commit_odm_task(project_id, task_id, base_url)
 
         # update odm state in database and return result to celery task
-        _update_odm_state(self.request.id, odm_state)
+        _update_odm_state(celery_task_id, odm_state)
         return odm_state.dict()
 
 
-@app.task(bind=True, base=AbortableTask, queue="update_odm_report")
-def update_odm_report(
+@app.task(bind=True, base=AbortableTask, queue="upload_odm_report")
+def upload_odm_report_to_cloud(
         self,
         project_id: int,
         task_id: str,
-        odm_host: str,
-        output_files: dict,
+        odm_resource_files: dict,
+        odm_radiometric: list,
         output_dir: str,
-        report_info: dict,
+        odm_host: str,
         report_no: str,
-        envs: dict
+        cid: str,
+        token: str
 ):
     """
     Update ODM report by downloading from ODM server and uploading to OSS.
@@ -211,14 +209,15 @@ def update_odm_report(
 
     Args:
         self: The Celery task instance
-        project_id (int): ODM project ID
-        task_id (str): ODM task ID
+        project_id (int): The ID of the project the images belong to
+        task_id (str): The task identifier for the ODM job
+        odm_resource_files (dict): The ODM report files to upload
+        odm_radiometric (list): The radiometric data for the ODM report
+        output_dir (str): The output directory for the ODM report
         odm_host (str): ODM server host URL
-        output_files (dict): Dictionary of output files to upload
-        output_dir (str): Local output directory path
-        report_info (dict): Report metadata
         report_no (str): Report number
-        envs (dict): Environment variables for OSS authentication
+        cid (str): company ID
+        token (str): clound service token
 
     Process:
         1. Initialize OSS client with credentials
@@ -226,42 +225,43 @@ def update_odm_report(
         3. Download full report ZIP from ODM server
         4. Upload all files to OSS with progress tracking
     """
-    odm_update_state = OdmUploadState(state=OdmJobStatus.running.value, total_progress={})
+    odm_update_state = utils.OdmUploadState(state=utils.OdmJobStatus.running.value, total_progress={})
 
     try:
-        OSS_DOMAIN = envs.get("OSS_DOMAIN").rstrip("/")
-        OSS_UPLOAD_KEY = envs.get("OSS_UPLOAD_KEY").rstrip("/")
+        import oss2
+        oss_upload_key = utils.format_oss_upload_prefix(project_id, task_id)
         # Initialize OSS client with credentials
         bucket = oss2.Bucket(
             oss2.AuthV4(
-                envs.get("OSS_ACCESS_KEY_ID"),
-                envs.get("OSS_ACCESS_KEY_SECRET")
+                os.getenv("OSS_ACCESS_KEY_ID"),
+                os.getenv("OSS_ACCESS_KEY_SECRET")
             ),
-            envs.get("OSS_ENDPOINT"),
-            envs.get("OSS_BUCKET"),
-            region=envs.get("OSS_REGION"),
+            os.getenv("OSS_ENDPOINT"),
+            os.getenv("OSS_BUCKET"),
+            region=os.getenv("OSS_REGION"),
         )
         logger.info("%s Initialize oss client %s", "▪ " * 15, "▪ " * 15)
 
-        # Get list of files to upload
-        upload_oss_files = get_odm_report_output_files(
-            project_id=project_id,
-            task_id=task_id,
-            output_dir=output_dir,
-            output_files=output_files
-        )
-        # Initialize progress tracking for all files
-        odm_update_state.total_progress = {ftype: (0, file_size) for ftype, _, _, file_size in upload_oss_files}
-
         # Handle all.zip file progress tracking
         odm_all_zip_url = f"{odm_host}/api/projects/{project_id}/tasks/{task_id}/download/all.zip"
-        odm_all_zip_size = get_content_length(odm_all_zip_url)
+        odm_all_zip_size = utils.get_content_length(odm_all_zip_url)
 
-        # Add zip file progress tracking
-        odm_update_state.total_progress["zip"] = (0, odm_all_zip_size)
-        odm_update_state.total_progress["download_zip"] = (0, odm_all_zip_size)
-        odm_update_state.total_progress["commit_report"] = (0, 5)
+        # Initialize progress tracking for fixed entries and all files
+        odm_update_state.total_progress = {
+            utils.ProgressKeys.DOWNLOAD_ALL_ZIP.value: (0, odm_all_zip_size),
+            utils.ProgressKeys.UPLOAD_ALL_ZIP.value: (0, odm_all_zip_size),
+            utils.ProgressKeys.COMMIT_REPORT.value: (0, 5)
+        }
+        output_files = utils.get_odm_report_output_files(output_dir, odm_resource_files, odm_radiometric)
+        logger.info("Ready to upload %d files:", len(output_files))
 
+        # Initialize progress tracking for all files with 3-digit sequential numbers
+        odm_update_state.total_progress.update({
+            f"{i+4:03d}": (0, file_size)
+            for i, (_, file_size) in enumerate(output_files)
+        })
+
+        # Upload progress callback function
         def progress_callback(key):
             def percentage(consumed_bytes, total_bytes):
                 # progress callback function for upload_progress_oss
@@ -276,61 +276,69 @@ def update_odm_report(
 
         # Download full report ZIP from ODM server
         local_write_zip = Path(output_dir) / "all.zip"
-        odm_all_zip, odm_all_zip_size = donwload_odm_all_zip(
+        odm_all_zip, odm_all_zip_size = utils.donwload_odm_all_zip(
             odm_all_zip_url,
             local_write_zip,
             total_bytes=odm_all_zip_size,
-            progress_callback=progress_callback("download_zip")
+            progress_callback=progress_callback(utils.ProgressKeys.DOWNLOAD_ALL_ZIP.value)
         )
 
         # Perform resumable upload with progress tracking for all files
-        upload_to_oss_urls = {}
-        for ftype, fpath, oss_url, file_size in upload_oss_files:
-            oss_url = OSS_UPLOAD_KEY + "/" + oss_url
-
-            logger.info("Starting resumable upload of %s to OSS path: %s", fpath, oss_url)
-            # track progress for each file type
-            bucket.put_object_from_file(oss_url, fpath, progress_callback=progress_callback(ftype))
-            upload_to_oss_urls[ftype] = OSS_DOMAIN + "/" + oss_url
+        for i, (fstr, _) in enumerate(output_files):
+            fpath = Path(fstr)
+            oss_url = oss_upload_key + "/" + Path(fpath).parent.name + "/" + Path(fpath).name
+            # upload file to OSS
+            logger.info("Start uploading %s to %s", fpath, oss_url)
+            bucket.put_object_from_file(oss_url, fpath, progress_callback=progress_callback(f"{i+4:03d}"))
 
         # Upload full report ZIP to OSS
-        zip_oss_url = OSS_UPLOAD_KEY + f"/{project_id}/{task_id}/all.zip"
-        logger.info("Starting resumable upload of %s to OSS path: %s", odm_all_zip, zip_oss_url)
-        bucket.put_object_from_file(zip_oss_url, odm_all_zip, progress_callback=progress_callback("zip"))
+        zip_oss_url = oss_upload_key + "/all.zip"
+        logger.info("Start uploading %s to %s", odm_all_zip, zip_oss_url)
+        bucket.put_object_from_file(
+            zip_oss_url,
+            odm_all_zip,
+            progress_callback=progress_callback(utils.ProgressKeys.UPLOAD_ALL_ZIP.value)
+        )
 
         # Commit report to online
-        commint_report(
-            commint_report_api=envs.get("DOM_COMMIT_REPORT_API"),
-            report_info=report_info,
-            token=envs.get("ODM_TOKEN"),
-            cid=envs.get("ODM_CID"),
+        utils.commint_report(
+            commint_report_api=os.getenv("DOM_COMMIT_REPORT_API"),
+            token=token,
+            cid=cid,
             report_no=report_no,
-            all_zip_url=OSS_DOMAIN + "/" + zip_oss_url,
-            output_files=upload_to_oss_urls
+            all_zip_url=os.getenv("OSS_DOMAIN").rstrip("/") + "/" + zip_oss_url
         )
-        odm_update_state.total_progress["commit_report"] = (5, 5)
-
-        # delete temporary zip file
+        odm_update_state.total_progress[utils.ProgressKeys.COMMIT_REPORT.value] = (5, 5)
+        # # delete temporary zip file
         local_write_zip.unlink()
     except TaskAbortedException as taex:
         logger.warning(taex)
-        odm_update_state.state = OdmJobStatus.canceled.value
+        odm_update_state.state = utils.OdmJobStatus.canceled.value
         odm_update_state.error = str(taex)
     except Exception as e:
         logger.error("Failed to upload ODM files to OSS: %s", e)
-        odm_update_state.state = OdmJobStatus.failed.value
+        odm_update_state.state = utils.OdmJobStatus.failed.value
         odm_update_state.error = str(e)
     finally:
         # update odm state in database and return result to celery task
         current_progress = _update_report_state(self.request.id, odm_update_state)
         if current_progress == 100.00:
-            odm_update_state.state = OdmJobStatus.completed.value
+            odm_update_state.state = utils.OdmJobStatus.completed.value
 
         return odm_update_state.dict()
 
 
 @app.task(bind=True, base=AbortableTask, queue="generate_odm_report")
-def generate_odm_report(self, envs: dict):
+def generate_odm_report(
+        self,
+        project_id,
+        task_id,
+        odm_job_name,
+        output_dir,
+        reflector_dest_dir,
+        orthophoto_tif,
+        log_file
+):
     """
     Generate an ODM report using a Docker container.
 
@@ -340,13 +348,13 @@ def generate_odm_report(self, envs: dict):
 
     Args:
         self: The Celery task instance
-        envs (dict): Environment variables for the Docker container, including:
-            - RSDM_IMAGE: The Docker image to use for report generation
-            - ODM_PROJECT_ID: The ODM project ID
-            - ODM_TASK_ID: The ODM task ID
-            - ODM_ORTHOPHOTO_TIF: Path to the orthophoto TIF file
-            - SERVICE_HOST_GATEWAY: Host gateway for container networking
-            - Other RSDM-specific environment variables
+        project_id (int): ODM project ID
+        task_id (str): ODM task ID
+        odm_job_name (str): ODM job name
+        output_dir (str): Local output directory path
+        reflector_dest_dir (str): Destination directory for reflector images
+        orthophoto_tif (str): Path to orthophoto TIF file
+        log_file (str): Path to log file
 
     Process:
         1. Sets up directory structure for input/output files
@@ -366,62 +374,50 @@ def generate_odm_report(self, envs: dict):
         - Mount necessary volumes for input, output, logs, and configuration files
         - Connect to the host network via extra_hosts configuration
     """
-    state_base = StateBase(state=OdmJobStatus.running.value)
+    state_base = utils.StateBase(state=utils.OdmJobStatus.running.value)
 
     try:
+        import platform
         work_dir = Path(os.getcwd())
-        OUTPUT_DIR = Path(envs.get("OMD_OUTPUT_DIR"))
-        logger.info("Starting ODM report generation, source directory: %s, output directory: %s",
-                    envs.get("ODM_ORTHOPHOTO_TIF"), OUTPUT_DIR)
+        output_dir = Path(output_dir)
+        logger.info("Starting ODM report generation from %s to %s", orthophoto_tif, output_dir)
         # Initialize Docker client
         client = docker.from_env()
+        # set en variables for docker container
+        envs = {
+            "ODM_SAVE_REPORT_API": os.getenv("ODM_SAVE_REPORT_API"),
+            "ODM_PROJECT_ID": project_id,
+            "ODM_TASK_ID": task_id
+        }
+        if filename_base := utils.clean_filename(odm_job_name):
+            envs["FILENAME_BASE"] = filename_base
 
         # Update state
         self.update_state(meta=state_base.dict())
-
         # Run the RSDM Docker container to generate the report
         client.containers.run(
-            stderr=True,
-            stdout=True,
-            image=envs.get("RSDM_IMAGE"),
-            command=["/bin/bash", "-c", "cp -r /media/* /app/images/ && ./start"],
+            detach=False,
+            remove=True,
+            image=os.getenv("RSDM_IMAGE"),
+            command=["./start"],
+            user=os.getuid(),
             environment=envs,
-            extra_hosts={
-                envs.get("SERVICE_HOST_GATEWAY"): "host-gateway"
-            },
-            remove=True,  # Automatically remove container when it exits
+            extra_hosts={os.getenv("SERVICE_HOST_GATEWAY"): "host-gateway"},
             volumes={
-                str(Path(envs.get("ODM_ORTHOPHOTO_TIF")).absolute()): {
-                    "bind": "/media/odm_orthophoto.tif",
-                    "mode": "ro"  # Read-only mount for input orthophoto
-                },
-                envs.get("ODM_LOG_FILE"): {
-                    "bind": "/app/app.log",
-                    "mode": "rw"  # Read-write mount for log file
-                },
-                str(OUTPUT_DIR.absolute()): {
-                    "bind": "/app/images/output",
-                    "mode": "rw"  # Read-write mount for output directory
-                },
-                str(work_dir / "docker/rsdm/algos.json"): {
-                    "bind": "/app/algos.json",
-                    "mode": "rw"  # Read-write mount for algorithms configuration
-                },
-                str(work_dir / "docker/rsdm/license"): {
-                    "bind": "/app/license",
-                    "mode": "ro"  # Read-only mount for license file
-                },
-                str(work_dir / "docker/rsdm/utils.py"): {
-                    "bind": "/app/utils.py",
-                    "mode": "rw"
-                }
+                str(Path(orthophoto_tif).absolute()): {"bind": "/app/images/odm_orthophoto.tif","mode": "ro"},
+                log_file: {"bind": "/app/app.log", "mode": "rw"},
+                str(Path(reflector_dest_dir).absolute()): {"bind": "/app/reflector", "mode": "rw"},
+                str(output_dir.absolute()): {"bind": "/app/images/output", "mode": "rw"},
+                str(work_dir / "docker/rsdm/algos.json"): {"bind": "/app/algos.json", "mode": "rw"},
+                str(work_dir / "docker/rsdm/license"): {"bind": "/app/license", "mode": "ro"},
+                str(work_dir / "docker/rsdm/utils.py"): {"bind": "/app/utils.py", "mode": "rw"}
             }
         )
         logger.info("ODM report generation complete.")
-        state_base.state = OdmJobStatus.completed.value
+        state_base.state = utils.OdmJobStatus.completed.value
     except Exception as e:
         logger.error("Failed to generate ODM report: %s", e)
-        state_base.state = OdmJobStatus.failed.value
+        state_base.state = utils.OdmJobStatus.failed.value
         state_base.error = str(e)
     finally:
         # update odm state in database and return result to celery task
@@ -455,7 +451,7 @@ def abort_task(celery_task_id: str) -> bool:
     return is_aborted
 
 
-def get_current_state(celery_task_id: str) -> Union[OdmState, None]:
+def get_current_state(celery_task_id: str) -> Union[utils.OdmState, None]:
     """
     Get the current state of an ODM job.
     Args:
@@ -468,7 +464,7 @@ def get_current_state(celery_task_id: str) -> Union[OdmState, None]:
         task = AbortableAsyncResult(celery_task_id)
 
         if task.name and task.worker:
-            current_state = OdmState(**task.result) if task.result else OdmState(state=task.state)
+            current_state = utils.OdmState(**task.result) if task.result else utils.OdmState(state=task.state)
     except ValueError as e:
         logger.error("Failed to get task result: %s", str(e))
         pass
@@ -476,7 +472,7 @@ def get_current_state(celery_task_id: str) -> Union[OdmState, None]:
         return current_state
 
 
-def get_report_current_state(celery_task_id: str) -> Union[OdmUploadState, None]:
+def get_report_current_state(celery_task_id: str) -> Union[utils.OdmUploadState, None]:
     """
     Get the current state of an ODM job.
     Args:
@@ -489,10 +485,57 @@ def get_report_current_state(celery_task_id: str) -> Union[OdmUploadState, None]
         task = AbortableAsyncResult(celery_task_id)
 
         if task.name and task.worker and task.result:
-            current_state = OdmUploadState(**task.result)
+            current_state = utils.OdmUploadState(**task.result)
             current_state.progress = _get_upload_progress(current_state.total_progress)
     except ValueError as e:
         logger.error("Failed to get task result: %s", str(e))
         pass
     finally:
         return current_state
+
+
+def _process_radiometric_data(
+        celery_task_id: str,
+        radiometric: Optional[list[list[dict]]],
+        reflector_dest_dir: Path
+) -> None:
+    """
+    Process radiometric data and save to config.json file.
+
+    This function handles the processing of radiometric calibration data by:
+    1. Copying image files to the reflector directory
+    2. Updating picture paths to relative paths
+    3. Saving the updated data to a config.json file
+
+    Args:
+        celery_task_id: The Celery task ID
+        radiometric: List of radiometric data rows, each containing items with picture info
+        reflector_dest_dir: Destination directory for reflector images
+
+    Returns:
+        None
+    """
+    if not radiometric or all(not row for row in radiometric):
+        return
+
+    # Process each radiometric item
+    for row in radiometric:
+        for item in row:
+            rad = utils.Radiometric(**item)
+            picture = utils.get_src_folder(rad.picture)
+            # Calculate surface reflectance for each picture
+            utils.get_surface_reflectance(picture, rad.coords, rad.panel_reflectance)
+            # Copy picture to reflector directory
+            shutil.copy(picture, reflector_dest_dir)
+            item["picture"] = os.path.join(reflector_dest_dir.name, os.path.basename(rad.picture))
+
+    # Save updated radiometric data to config.json
+    config_path = reflector_dest_dir / "config.json"
+    with open(config_path, 'w', encoding='utf-8') as f:
+        json.dump(radiometric, f, indent=4, ensure_ascii=False)
+
+    with with_db_session() as db:
+        db.query(OdmJobs).filter(OdmJobs.celery_task_id == celery_task_id).update({OdmJobs.radiometric: radiometric})
+        db.commit()
+
+    logger.info("Saved radiometric data to %s", config_path)

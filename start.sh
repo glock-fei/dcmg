@@ -60,7 +60,7 @@ celery -A worker.app worker -l info -Q generate_odm_report -n geworker@%h -c 1 \
     --pidfile="${PID_DIR}/geworker.pid" >> "$MAIN_LOG" 2>> "$ERROR_LOG" &
 GEWORKER_PID=$!
 
-celery -A worker.app worker -l info -Q update_odm_report -n upworker@%h -c 1 \
+celery -A worker.app worker -l info -Q upload_odm_report -n upworker@%h -c 1 \
     --pidfile="${PID_DIR}/upworker.pid" >> "$MAIN_LOG" 2>> "$ERROR_LOG" &
 UPWORKER_PID=$!
 

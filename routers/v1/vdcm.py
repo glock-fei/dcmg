@@ -25,7 +25,7 @@ router = APIRouter(prefix='/3dcm')
 
 
 @router.post('/jobs', status_code=status.HTTP_201_CREATED)
-async def create_3dcm_job(data: utils.Vdcm, db: Session = Depends(models.get_database)):
+async def create_3dcm_job(data: utils.VdcmCreate, db: Session = Depends(models.get_database)):
     """
     ### Create a new VDCM job
 
@@ -37,7 +37,7 @@ async def create_3dcm_job(data: utils.Vdcm, db: Session = Depends(models.get_dat
     5. Saving the job information to the database
 
     ### Parameters:
-    - **data**: Vdcm model containing job information including task ID and source path
+    - **data**: VdcmCreate model containing job information including task ID and source path
     - **db**: Database session dependency
 
     ### Special handling:
@@ -101,7 +101,7 @@ async def create_3dcm_job(data: utils.Vdcm, db: Session = Depends(models.get_dat
 
     # Create a new RSDM job record
     new_3dcm_job = models.VdcmJobs(
-        **data.__dict__,
+        **data.dict(),
         dest_path=str(dest_path),
         celery_task_id=task.id,
         state=utils.OdmJobStatus.pending.value,
@@ -156,7 +156,8 @@ async def update_job_progress(no: str, percent: float, db: Session = Depends(mod
 async def get_jobs(
         page: int = 1,
         limit: int = 1000,
-        only_running: bool = True,
+        state: utils.OdmJobStatus = None,
+        title: str = None,
         db: Session = Depends(models.get_database)
 ):
     """
@@ -185,18 +186,19 @@ async def get_jobs(
     # Query VDCM jobs and join with uploads relation for complete information
     query = db.query(models.VdcmJobs).order_by(desc(models.VdcmJobs.id))
     query = query.outerjoin(models.VdcmUploads, models.VdcmUploads.job_id == models.VdcmJobs.id)
+
+    # Filter by state and title if provided
+    if state:
+        query = query.filter(models.VdcmJobs.state == state.value)
+    if title:
+        query = query.filter(models.VdcmJobs.title.ilike(f'%{title}%'))
+
     # Apply pagination to limit the number of results
     data: list[models.VdcmJobs] = query.offset((page - 1) * limit).limit(limit).all()
 
     result = []
     # Process each job to filter based on running status and update upload progress
     for job in data:
-        # Add job to result if we want all jobs or if job is running
-        if not only_running:
-            result.append(job)
-        elif job.state == utils.OdmJobStatus.running.value:
-            result.append(job)
-
         # If job has uploads, update progress from Celery task state
         if job.uploads:
             # Get the Celery task associated with the upload
@@ -207,6 +209,8 @@ async def get_jobs(
                 current_state = utils.OdmUploadState(**task.result)
                 # Calculate total progress and round to 2 decimal places
                 job.uploads.progress = round(sum(current_state.total_progress.values()), 2)
+
+        result.append(job)
 
     return result
 
@@ -401,3 +405,49 @@ def upload_report(
     db.refresh(new_upload_task)
 
     return new_upload_task
+
+
+@router.put('/jobs/{no}')
+async def update_job(
+        no: str,
+        job_update: utils.VdcmBase,
+        db: Session = Depends(models.get_database)
+):
+    """
+    ### Update a VDCM job
+
+    This endpoint updates an existing VDCM job:
+    1. Finds the job in the database using the task ID
+    2. Validates that the job exists
+    3. Updates only the allowed job fields with the provided data
+    4. Commits the changes to the database
+
+    ### Parameters:
+    - **no**: The ID of the task to update
+    - **job_update**: VdcmUpdate model containing updated job information (only title and frame_count can be updated)
+    - **db**: Database session dependency
+
+    ### Returns:
+    - **VdcmJobs**: The updated job object
+
+    ### Raises:
+    - **HTTPException**: 404 error if task with specified ID does not exist
+    """
+    job: models.VdcmJobs = db.query(models.VdcmJobs).filter(models.VdcmJobs.no == no).first()
+
+    # Check if job exists
+    if not job:
+        raise HTTPException(status_code=404, detail=_("Task with no %(no)s does not exist.") % {"no": no})
+
+    job.title = job_update.title
+    job.sample_number = job_update.sample_number
+    job.sample_batch_number = job_update.sample_batch_number
+
+    # Update the updated_at timestamp
+    job.update_at = datetime.now()
+    
+    # Commit changes to database
+    db.commit()
+    db.refresh(job)
+
+    return job

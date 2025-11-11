@@ -10,8 +10,15 @@ from urllib.parse import urljoin
 from pydantic import BaseModel
 import requests
 from utils.translation import gettext_lazy as _
+from .radiometric import Radiometric
 
 logger = logging.getLogger(__name__)
+
+
+class ProgressKeys(Enum):
+    DOWNLOAD_ALL_ZIP = "001"
+    UPLOAD_ALL_ZIP = "002"
+    COMMIT_REPORT = "003"
 
 
 class OdmType(Enum):
@@ -55,14 +62,14 @@ class OdmAlgoRep(BaseModel):
     """
     Model for ODM algorithm report.
     """
-    project_id: int
-    task_id: str
-    output_dir: str
-    log_file: str
     algo_name: str
     file_name: str
     area_mu: float
     report: dict
+    min_value: float
+    max_value: float
+    mean_value: float
+    std_dev: float
 
 
 class UploadRepTask(BaseModel):
@@ -72,7 +79,6 @@ class UploadRepTask(BaseModel):
     project_id: int
     task_id: str
     report_no: str
-    algo_name: str = "ndvi"
 
 
 class OdmGenRep(BaseModel):
@@ -81,6 +87,7 @@ class OdmGenRep(BaseModel):
     """
     project_id: int
     task_id: str
+    odm_job_name: Optional[str]
     orthophoto_tif: str = "odm_orthophoto/odm_orthophoto.tif"
 
 
@@ -99,6 +106,7 @@ class OdmJob(BaseModel):
     odm_samplinge_time: datetime
     odm_host: str
     odm_create_at: datetime
+    radiometric: Optional[list[list[Radiometric]]] = None
 
     def to_dict(self):
         """
@@ -308,45 +316,40 @@ def get_dest_folder(project_id: int, task_id: str) -> str:
     return str(dest_folder.resolve())
 
 
-def create_odm_output_folder(project_id: int, task_id: str) -> (str, str):
+def prepare_odm_output_structure(project_id: int, task_id: str, skip_creation: bool = True) -> (Path, Path, Path):
     """
-    Create the output folder structure for an ODM task.
+    Prepare the output folder structure for an ODM task.
 
-    This function creates the output folder structure for an ODM task
-    and returns the absolute path to the output folder and log file.
+    This function prepares the output folder structure for an ODM task
+    and returns the absolute paths to the output folder, log file and reflector folder.
 
     Args:
         project_id (int): The project ID
         task_id (str): The task ID
+        skip_creation (bool): skip creation of output folder and log file. Default is False.
 
     Returns:
-        str: The absolute path to the output folder
-        str: The absolute path to the log file
+        Path: The absolute path to the output folder
+        Path: The absolute path to the log file
+        Path: The absolute path to the reflector folder
 
     """
     work_dir = Path(os.getcwd())
-    ODM_DIR = work_dir / os.getenv("STATIC_DIR", "static") / "odm"
-    OUTPUT_DIR = ODM_DIR / str(project_id) / task_id
-    LOG_FILE = OUTPUT_DIR / "app.log"
-
-    # todo: Docker container permission issue - cannot remove existing directories
-    #  For now, we skip the cleanup and only create new directories as needed.
-    # if remove_existing:
-    #     # Clean up existing output directory if it exists
-    #     if OUTPUT_DIR.exists():
-    #         shutil.rmtree(OUTPUT_DIR)
+    odm_dir = work_dir / os.getenv("STATIC_DIR", "static") / "odm"
+    output_dir = odm_dir / str(project_id) / task_id
+    log_file = output_dir / "app.log"
+    reflector_dest_dir = output_dir / "reflector"
 
     # Create new output directory structure and log file
-    if not OUTPUT_DIR.exists():
-        OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    if not skip_creation:
+        reflector_dest_dir.mkdir(parents=True, exist_ok=True)
+        # remove existing log file if exists
+        if log_file.exists():
+            log_file.unlink()
+        log_file.touch()
+    logger.info("save log to file: %s", log_file.resolve())
 
-    if LOG_FILE.exists():
-        LOG_FILE.unlink()
-
-    LOG_FILE.touch()
-    logger.info("save log to file: %s", LOG_FILE.resolve())
-
-    return str(OUTPUT_DIR.resolve()), str(LOG_FILE.resolve())
+    return output_dir.resolve(), log_file.resolve(), reflector_dest_dir.resolve()
 
 
 def get_content_length(url: str) -> int:
@@ -414,62 +417,114 @@ def donwload_odm_all_zip(
     return str(local_write_zip.resolve()), local_write_zip.stat().st_size
 
 
-def get_odm_report_output_files(project_id: int, task_id: str, output_dir: str, output_files: dict) -> list:
+def get_odm_report_output_files(output_dir: str, output_files: dict, radiometric: list[list[Radiometric]]) -> list:
     """
     Get the output files from the ODM processing and upload them to OSS.
     This function retrieves the output files from the ODM processing and
     uploads them to OSS.
 
     Args:
-        project_id (int): The project ID
-        task_id (str): The task ID
         output_dir (str): The absolute path to the output folder
         output_files (dict): The output files from the ODM processing. For example: {"png": "ndvi/ndvi.1755608497.5589726.png"}
+        radiometric (list[list[Radiometric]]): The radiometric information to include in the report.
     Returns:
         list: A list of tuples containing the local file path and the OSS path to upload to
     """
-    _files = []
+    report_dir = Path(output_dir)
+    resource_files = []
 
-    for ftype, fpath in output_files.items():
-        local_file = Path(output_dir) / fpath
+    def process_paths(paths):
+        for path in paths:
+            if path and (picture := report_dir / path).exists():
+                resource_files.append((str(picture), picture.stat().st_size))
 
-        # Check if output file exists
-        if not local_file.exists():
-            raise FileNotFoundError(f"Output file {local_file} does not exist")
+    if output_files:
+        process_paths(fpath for row in output_files.values() for fpath in row.values())
 
-        file_size = local_file.stat().st_size
-        # Add output file to upload list
-        current_file = (ftype, local_file, f"{project_id}/{task_id}/{local_file.name}", file_size)
-        _files.append(current_file)
+    if radiometric:
+        process_paths(item.get("picture") for row in radiometric for item in row)
 
-    return _files
+    return resource_files
 
 
-def commint_report(commint_report_api: str, report_info: dict, token: str,
-                   cid: str, report_no: str, all_zip_url: str,
-                   output_files: dict):
+def get_odm_report_json(output_dir: str) -> Path:
+    """
+    Get the report.json file from the ODM processing.
+    """
+    return Path(output_dir) / "report.json"
+
+
+def get_odm_resource_files(output_dir: str):
+    """
+    get the resource files from the ODM processing.
+    """
+    import json
+    resource_files = {}
+
+    report_json = get_odm_report_json(output_dir)
+    if report_json.exists():
+        with open(report_json, "r") as f:
+            # Load report info from json file
+            report_info = json.load(f)
+            report = report_info.get("report", [])
+            # Extract resource files from reflect and vegetation outputs
+            if len(report) > 0:
+                resource_files = {
+                    **dict(report[0].get("band", {})),
+                    **{veg["name"]: veg.get("output", {}) for veg in report[0].get("vegetation", [])}
+                }
+
+    return resource_files
+
+
+def format_oss_upload_prefix(project_id: int, task_id: str) -> str:
+    """
+    Format the OSS upload prefix for the specified project and task.
+    """
+    return "{}/odm/{}/{}".format(os.getenv("OSS_UPLOAD_KEY").rstrip("/"), str(project_id), str(task_id))
+
+
+def clean_filename(filename):
+    """
+    Clean the filename by removing invalid characters and replacing them with underscores.
+    """
+    if filename is not None:
+        import re
+
+        cleaned = re.sub(r'[<>:"/\\|?*@#!$%^&()+=.,;\[\]]', '_', filename)
+        cleaned = re.sub(r'_+', '_', cleaned)
+        cleaned = cleaned.strip('_')
+
+        if not cleaned:
+            return None
+        return cleaned
+
+
+def commint_report(
+        commint_report_api: str,
+        token: str,
+        cid: str,
+        report_no: str,
+        all_zip_url: str
+):
     """
     Commit the ODM report to the cloud.
     This function sends a commit request to the ODM server to commit the report to the cloud.
 
     Args:
         commint_report_api (str): The API endpoint URL to commit the report
-        report_info (dict): The report information to commit
         token (str): The token to authenticate the request
         report_no (str): The report number to commit
         cid (str): The client ID to authenticate the request
         all_zip_url (str): The URL of the all.zip report to commit
-        output_files (dict): The output files from the ODM processing. For example: {"png": "ndvi/ndvi.1755608497.5589726.png"}
     """
     with requests.post(
             commint_report_api,
             headers={"token": token, "cid": cid},
             json={
                 "report_no": report_no,
-                "report_info": report_info,
                 "resource_files": {
                     "files": [all_zip_url],
-                    "ndvi": output_files
                 }
             },
             timeout=(5, 5)

@@ -15,18 +15,24 @@ class JobType(str, Enum):
     IMAGE = 'IMAGE'
 
 
-class Vdcm(BaseModel):
+class VdcmBase(BaseModel):
     """
-    VDCM data model for handling video/image metadata
+    VDCM base model containing common fields
     """
-    no: str = Field(None, min_length=1, max_length=32, description="Unique record identifier")
     title: str = Field(None, min_length=1, max_length=255, description="Title of the job")
-    job_type: JobType = Field(..., description="Type of job - VIDEO or IMAGE")
-    src_path: str = Field(..., min_length=1, max_length=255, description="Source path of the media file")
-    frame_count: int = Field(default=150, ge=150, description="Number of frames in the media file")
     sample_number: str = Field(..., min_length=1, max_length=16, description="Sample number identifier")
     sample_batch_number: str = Field(..., min_length=1, max_length=16, description="Batch number for sample group")
+
+
+class VdcmCreate(VdcmBase):
+    """
+    VDCM model for creating new jobs
+    """
+    no: str = Field(None, min_length=1, max_length=32, description="Unique record identifier")
+    job_type: JobType = Field(..., description="Type of job - VIDEO or IMAGE")
+    src_path: str = Field(..., min_length=1, max_length=255, description="Source path of the media file")
     taken_at: date = Field(None, description="Timestamp when media was captured")
+    frame_count: int = Field(default=150, ge=150, description="Number of frames in the media file")
 
 
 class ErrorLevel(Enum):

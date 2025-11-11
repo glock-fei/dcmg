@@ -30,31 +30,15 @@ def send_report_to_server(report_filename: Path):
     args:
         report_filename: Path, report file path.
     """
-    with open(report_filename, "r", encoding="utf-8") as report:
-        data = json.load(report)
+    try:
+        res = requests.put(
+            url="{}/{}/{}".format(
+                os.getenv("ODM_SAVE_REPORT_API"),
+                os.getenv("ODM_PROJECT_ID"),
+                os.getenv("ODM_TASK_ID")
+            ), timeout=(2, 3)
+        )
 
-        for item in data.get("report"):
-            file_name = item.get("file_name")
-            area_mu = item.get("area_mu")
-
-            # send report to server
-            for algo_name, odm_rep in item.items():
-                if algo_name == "ndvi":
-                    try:
-                        res = requests.post(
-                            url=os.getenv("ODM_SAVE_REPORT_API"),
-                            json={
-                                "project_id": os.getenv("ODM_PROJECT_ID"),
-                                "task_id": os.getenv("ODM_TASK_ID"),
-                                "algo_name": algo_name,
-                                "file_name": file_name,
-                                "output_dir": os.getenv("OMD_OUTPUT_DIR"),
-                                "log_file": os.getenv("ODM_LOG_FILE"),
-                                "area_mu": area_mu,
-                                "report": odm_rep
-                            }, timeout=(2, 3)
-                        )
-
-                        log.info("Send report to server, http status code:%d", res.status_code)
-                    except requests.exceptions.RequestException as e:
-                        log.error("Failed to send report to server, error:%s", e)
+        log.info("Send report to server, http status code:%d", res.status_code)
+    except requests.exceptions.RequestException as e:
+        log.error("Failed to send report to server, error:%s", e)

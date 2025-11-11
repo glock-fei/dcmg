@@ -6,7 +6,30 @@
     "N": "nir",
     "RE": "rededge"
   },
+  "gdal_options": [
+    "COMPRESS=DEFLATE",
+    "ZLEVEL=1",
+    "PREDICTOR=2",
+    "TILED=YES",
+    "TFW=YES",
+    "BLOCKXSIZE=256",
+    "BLOCKYSIZE=256",
+    "NUM_THREADS=ALL_CPUS",
+    "BIGTIFF=IF_NEEDED"
+  ],
   "algos": [
+    {
+      "name": "GNDVI",
+      "colormap": "colorbrewer:RdYlGn",
+      "expr": "(N - G) / (N + G)",
+      "help": "Green Normalized Difference Vegetation Index is similar to NDVI, but measures the green spectrum instead of red."
+    },
+    {
+      "name": "NDRE",
+      "colormap": "colorbrewer:RdYlGn",
+      "expr": "(N - RE) / (N + RE)",
+      "help": "Normalized Difference Red Edge Index shows the amount of green vegetation of permanent or later stage crops."
+    },
     {
       "name": "NDVI",
       "colormap": "colorbrewer:RdYlGn",
