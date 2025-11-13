@@ -17,22 +17,22 @@ async def recover_job_failed(app: FastAPI):
     Recover tasks that were interrupted by system shutdown.
     This function should be called when the application starts.
     """
-    with with_db_session() as db:
-        # Recover failed OdmJobs
-        _recover_failed_tasks(
-            db.query(OdmJobs).filter(
-                OdmJobs.state == OdmJobStatus.failed.value,
-            ).all(),
-            OdmState
-        )
-
-        # Recover failed OdmReports
-        _recover_failed_tasks(
-            db.query(OdmReport).filter(
-                OdmReport.state == OdmJobStatus.failed.value,
-            ).all(),
-            OdmUploadState
-        )
+    # with with_db_session() as db:
+    #     # Recover failed OdmJobs
+    #     _recover_failed_tasks(
+    #         db.query(OdmJobs).filter(
+    #             OdmJobs.state == OdmJobStatus.failed.value,
+    #         ).all(),
+    #         OdmState
+    #     )
+    #
+    #     # Recover failed OdmReports
+    #     _recover_failed_tasks(
+    #         db.query(OdmReport).filter(
+    #             OdmReport.state == OdmJobStatus.failed.value,
+    #         ).all(),
+    #         OdmUploadState
+    #     )
 
     yield
     logger.info("Cleaning up...")

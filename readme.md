@@ -85,8 +85,48 @@ dcmg/
 - **ORM**: SQLAlchemy
 - **Database Migrations**: Alembic
 
+## Docker Deployment
 
-## Installation
+The application can be deployed using Docker Compose which includes all necessary services:
+
+1. **Build and Start Services**:
+```bash
+# Build the Docker images
+docker-compose build --no-cache
+
+# Start all services in detached mode
+docker-compose up -d
+```
+
+2. **Check Service Status**:
+```bash
+# View running containers
+docker-compose ps
+
+# View logs for a specific service
+docker-compose logs -f app
+docker-compose logs -f redis
+docker-compose logs -f worker-default
+```
+
+3. **Stop Services**:
+```bash
+# Stop all services
+docker-compose down
+
+# Stop services and remove volumes
+docker-compose down -v
+```
+
+4. **Service Descriptions**:
+   - `app`: Main FastAPI application service, exposed on port 7777
+   - `redis`: Redis service for Celery message broker and result backend
+   - `worker-default`: Celery worker for default task queue
+   - `worker-generate-odm`: Celery worker for ODM report generation tasks
+   - `worker-upload-odm`: Celery worker for ODM report upload tasks
+   - `worker-reconstruction`: Celery worker for reconstruction tasks
+
+## Manual Installation
 ```bash
 # Clone the repository
 git clone https://github.com/glock-fei/dcmg.git
@@ -105,7 +145,7 @@ venv\Scripts\activate # Windows
 
 # install requirements
 pip install -r requirements.txt
-````
+```
 
 ## Redis Setup
 ```bash
@@ -119,7 +159,8 @@ docker run --name my-redis -d -p 6379:6379 --restart unless-stopped redis:latest
 ```bash
 # Start the Celery worker
 celery -A worker.app worker --loglevel=info
-````
+```
+
 ## Configuration
 
 ### Set environment variables by copying the example file
@@ -133,7 +174,7 @@ copy .env.example .env
 # Create database migrations (if needed)
 # alembic revision --autogenerate -m "init"
 
-# Upgrade the database to the latest versio
+# Upgrade the database to the latest version
 alembic upgrade head
 ```
 
@@ -145,6 +186,7 @@ python main.py
 # Or with uvicorn:
 uvicorn main:app --host 0.0.0.0 --port 8000 --reload
 ```
+
 ## Internationalization
 ```shell
 # Extract translatable messages

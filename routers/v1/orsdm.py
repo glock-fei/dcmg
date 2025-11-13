@@ -591,17 +591,16 @@ def get_report_detail(
     - **task_id**: The task ID of the ODM task
 
     ### Response:
-    Returns `OdmReport`
+        Returns `OdmReport`
     """
-    query = db.query(models.OdmReport).options(
-        selectinload(models.OdmReport.job).selectinload(models.OdmJobs.vegetation))
+    query = db.query(models.OdmReport).options(selectinload(models.OdmReport.job).selectinload(models.OdmJobs.vegetation))
     query = query.join(models.OdmJobs, models.OdmJobs.id == models.OdmReport.job_id)
     query = query.filter(models.OdmJobs.odm_project_id == project_id)
     query = query.filter(models.OdmJobs.odm_task_id == task_id)
     orp: models.OdmReport = query.first()
 
     if not orp:
-        raise HTTPException(status_code=404, detail=_("Report not found, please try again later."))
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=_("Report not found, please try again later."))
 
     # Get the current state of the Celery task
     if orp.celery_task_id:

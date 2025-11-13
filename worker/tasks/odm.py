@@ -9,8 +9,12 @@ from pathlib import Path
 from typing import Union, Optional
 
 import docker
+import numpy as np
+import rasterio
 from celery.contrib.abortable import AbortableTask, AbortableAsyncResult
 from fastapi import HTTPException
+
+import models
 import utils
 from worker.app import app
 from models import with_db_session, OdmJobs, OdmReport, OdmGeTask
@@ -257,7 +261,7 @@ def upload_odm_report_to_cloud(
 
         # Initialize progress tracking for all files with 3-digit sequential numbers
         odm_update_state.total_progress.update({
-            f"{i+4:03d}": (0, file_size)
+            f"{i + 4:03d}": (0, file_size)
             for i, (_, file_size) in enumerate(output_files)
         })
 
@@ -289,7 +293,7 @@ def upload_odm_report_to_cloud(
             oss_url = oss_upload_key + "/" + Path(fpath).parent.name + "/" + Path(fpath).name
             # upload file to OSS
             logger.info("Start uploading %s to %s", fpath, oss_url)
-            bucket.put_object_from_file(oss_url, fpath, progress_callback=progress_callback(f"{i+4:03d}"))
+            bucket.put_object_from_file(oss_url, fpath, progress_callback=progress_callback(f"{i + 4:03d}"))
 
         # Upload full report ZIP to OSS
         zip_oss_url = oss_upload_key + "/all.zip"
@@ -404,7 +408,7 @@ def generate_odm_report(
             environment=envs,
             extra_hosts={os.getenv("SERVICE_HOST_GATEWAY"): "host-gateway"},
             volumes={
-                str(Path(orthophoto_tif).absolute()): {"bind": "/app/images/odm_orthophoto.tif","mode": "ro"},
+                str(Path(orthophoto_tif).absolute()): {"bind": "/app/images/odm_orthophoto.tif", "mode": "ro"},
                 log_file: {"bind": "/app/app.log", "mode": "rw"},
                 str(Path(reflector_dest_dir).absolute()): {"bind": "/app/reflector", "mode": "rw"},
                 str(output_dir.absolute()): {"bind": "/app/images/output", "mode": "rw"},
@@ -539,3 +543,104 @@ def _process_radiometric_data(
         db.commit()
 
     logger.info("Saved radiometric data to %s", config_path)
+
+
+@app.task(bind=True, base=AbortableTask)
+def sampling_statistics(
+        self,
+        output_dir: str,
+        resource_files,
+        quadrats: list[tuple[int, list[tuple[float, float]]]]
+):
+    """
+    Calculate sampling statistics for each quadrat in each algorithm.
+
+    This function handles the calculation of sampling statistics for each quadrat in each algorithm
+    """
+    sampling_state = utils.OdmState(state=utils.OdmJobStatus.running.value)
+    total_progress = len(quadrats) * len(resource_files) + 1  # +1 for database commit step
+    current_progress = 0
+
+    try:
+        resource_dir = Path(output_dir)
+        records = []
+
+        logger.info(
+            "Starting sampling statistics calculation. Output dir: %s, Number of algorithms: %d, Number of quadrats: %d",
+            output_dir, len(resource_files), len(quadrats))
+
+        for algo_name, files in resource_files.items():
+            tif_file = resource_dir / files.get("tif")
+            logger.info("Opening TIF file: %s | Algorithm: %s", tif_file, algo_name)
+
+            with rasterio.open(tif_file) as src:
+                logger.info("Successfully opened TIF file. Image dimensions: %s", src.shape)
+
+                for quadrat_id, coords in quadrats:
+                    # check if task is aborted
+                    if self.is_aborted():
+                        raise TaskAbortedException("Task aborted by user.")
+
+                    logger.debug("Processing quadrat ID: %d with %d coordinates", quadrat_id, len(coords))
+
+                    # get dn values in polygon
+                    dn_values, sorted_coords = utils.get_dn_values_in_polygon(coords, src)
+                    stat_record = models.OdmQuadratStatistics(
+                        quadrat_id=quadrat_id,
+                        algo_name=algo_name,
+                        picture=files.get("tif"),
+                        dn_min=float(np.min(dn_values)),
+                        dn_max=float(np.max(dn_values)),
+                        dn_mean=float(np.mean(dn_values)),
+                        dn_std=float(np.std(dn_values))
+                    )
+
+                    records.append(stat_record)
+                    logger.info("Quadrat %d stats - Min: %.2f, Max: %.2f, Mean: %.2f, Std: %.2f",
+                                quadrat_id, stat_record.dn_min, stat_record.dn_max, stat_record.dn_mean,
+                                stat_record.dn_std)
+
+                    current_progress += 1
+                    # Update progress more accurately
+                    sampling_state.progress = round(current_progress / total_progress * 100, 2)
+                    self.update_state(meta=sampling_state.dict())
+                    time.sleep(1)
+
+        logger.info("Completed processing all quadrats for all algorithms. Total records: %d", len(records))
+        # save sampling statistics to database
+        if len(records) > 0:
+            with with_db_session() as db:
+                models.OdmQuadratStatistics.bulk_upsert(db, records)
+                db.commit()
+                logger.info("Saved %d records to database", len(records))
+        # dont forget to update progress to 100%
+        current_progress += 1
+    except TaskAbortedException as taex:
+        logger.warning(taex)
+        sampling_state.state = utils.OdmJobStatus.canceled.value
+        sampling_state.error = str(taex)
+    except Exception as e:
+        logger.error("Failed to calculate sampling statistics: %s", e, exc_info=True)
+        sampling_state.state = utils.OdmJobStatus.failed.value
+        sampling_state.error = str(e)
+    finally:
+        if current_progress == total_progress:
+            sampling_state.progress = 100.00
+            sampling_state.state = utils.OdmJobStatus.completed.value
+            logger.info("Sampling statistics task completed successfully")
+
+        # Lastly, update the sampling record with the latest progress.
+        with with_db_session() as db:
+            samprd = db.query(models.OdmSamplingRecord).filter(
+                models.OdmSamplingRecord.celery_task_id == self.request.id
+            ).first()
+
+            if samprd:
+                samprd.state = sampling_state.state
+                samprd.error = sampling_state.error
+                samprd.progress = sampling_state.progress
+                samprd.update_at = datetime.now()
+
+                db.commit()
+
+        return sampling_state.dict()

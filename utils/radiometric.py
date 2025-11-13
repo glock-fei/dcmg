@@ -13,6 +13,25 @@ from utils.translation import gettext_lazy as _
 logger = logging.getLogger(__name__)
 
 
+class QuadratBase(BaseModel):
+    """
+    Model for quadrats.
+    """
+    name: Optional[str] = Field(None, description="Name of the quadrat")
+    coords: list[tuple[float, float]] = Field(..., description="Coordinates of the quadrat")
+    center: tuple[float, float] = Field(..., description="Center of the quadrat")
+
+
+class Sampling(BaseModel):
+    """
+    Model for quadrats.
+    """
+    title: Optional[str] = Field(None, description="Title of the quadrats")
+    project_id: int = Field(..., description="Project ID of odm task")
+    task_id: str = Field(..., description="Task ID of odm task")
+    # quadrats: List[QuadratBase] = Field(..., description="Quadrats")
+
+
 class Radiometric(BaseModel):
     """
     Model for radiometric information.
@@ -20,7 +39,8 @@ class Radiometric(BaseModel):
     name: str
     picture: str
     coords: list[tuple[float, float]]
-    panel_reflectance: float = Field(ge=0, le=1, description="Reflectance coefficient of the reflectance panel (e.g. 0.5)")
+    panel_reflectance: float = Field(ge=0, le=1,
+                                     description="Reflectance coefficient of the reflectance panel (e.g. 0.5)")
 
 
 def sort_coordinates_clockwise(
@@ -41,6 +61,36 @@ def sort_coordinates_clockwise(
     return coords[sorted_indices].tolist()
 
 
+def get_dn_values_in_polygon(
+        coord: list[Tuple[float, float]],
+        src: rasterio.io.DatasetReader
+) -> tuple[np.ndarray, list[Tuple[float, float]]]:
+    """
+    Extracts the DN values in the polygon.
+
+    """
+    # Sort coordinates in clockwise order
+    sorted_coords = sort_coordinates_clockwise(coord)
+    polygon = Polygon(sorted_coords)
+
+    # Extract the region using the mask function
+    masked_image, _ = mask(src, [polygon], crop=True, filled=False)
+
+    # Flatten the image array to 1D and create a mask for valid values
+    flattened = masked_image.flatten()
+    valid_mask = ~np.isnan(flattened) & np.isfinite(flattened) & (flattened > 0)
+
+    # Exclude nodata values if present
+    if src.nodata is not None:
+        valid_mask &= (flattened != src.nodata)
+
+    # Check if we have any valid values
+    if not np.any(valid_mask):
+        raise ValueError(_("No valid DN values found in the selected panel region"))
+
+    return np.array(flattened[valid_mask]), sorted_coords
+
+
 def get_surface_reflectance(
         tif_file: Union[str, Path],
         panel_coords: List[Tuple[float, float]],
@@ -53,33 +103,12 @@ def get_surface_reflectance(
     The software automatically applies the reflectance panel coefficient to convert 
     the DN values to surface reflectance in the range 0-1.
     """
-    # Sort coordinates in clockwise order and create polygon
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", category=rasterio.errors.NotGeoreferencedWarning)
-
         # Open the TIFF file
         with rasterio.open(tif_file) as src:
-            # Sort coordinates in clockwise order
-            sorted_coords = sort_coordinates_clockwise(panel_coords)
-            # Create polygon from sorted coordinates
-            polygon = Polygon(sorted_coords)
-
-            # Extract the region using the mask function
-            masked_image, _ = mask(src, [polygon], crop=True, filled=True)
-
-            # Flatten the image array to 1D and create a mask for valid values
-            flattened = masked_image.flatten()
-            valid_mask = ~np.isnan(flattened) & np.isfinite(flattened) & (flattened > 0)
-
-            # Exclude nodata values if present
-            if src.nodata is not None:
-                valid_mask &= (flattened != src.nodata)
-
-            # Check if we have any valid values
-            if not np.any(valid_mask):
-                raise ValueError(_("No valid DN values found in the selected panel region"))
-            # Calculate mean of valid DN values
-            mean_dn = np.mean(flattened[valid_mask])
+            dn_values, sorted_coords = get_dn_values_in_polygon(panel_coords, src)
+            mean_dn = np.mean(dn_values)
 
             # Check if mean is zero or very close to zero to avoid division by zero
             if np.isclose(mean_dn, 0.0) or np.isnan(mean_dn) or not np.isfinite(mean_dn):
