@@ -1,7 +1,6 @@
 import os
 from pathlib import Path
-from tools import Logger
-
+from tools.logger import Logger
 import requests
 
 log = Logger().get_log()

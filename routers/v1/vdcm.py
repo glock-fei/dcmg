@@ -1,4 +1,3 @@
-import hashlib
 import logging
 import os
 import shutil
@@ -21,15 +20,15 @@ import worker.tasks as tasks
 from utils.translation import gettext_lazy as _
 
 logger = logging.getLogger(__name__)
-router = APIRouter(prefix='/3dcm')
+router = APIRouter(prefix='/croppheno')
 
 
 @router.post('/jobs', status_code=status.HTTP_201_CREATED)
-async def create_3dcm_job(data: utils.VdcmCreate, db: Session = Depends(models.get_database)):
+async def create_croppheno_job(data: utils.VdcmCreate, db: Session = Depends(models.get_database)):
     """
-    ### Create a new VDCM job
+    ### Create a new CropPheno job
 
-    This endpoint creates a new VDCM job by:
+    This endpoint creates a new CropPheno job by:
     1. Checking if a job with the same ID already exists
     2. Validating that the source file exists
     3. Creating destination folders for output
@@ -43,6 +42,8 @@ async def create_3dcm_job(data: utils.VdcmCreate, db: Session = Depends(models.g
     ### Special handling:
     - **no**: If not provided, a unique ID will be generated in the format PXXXXX_YY_SAMPLEBATCH_SAMPLE,
       where XXXXX is a 5-digit number and YY is a 2-digit number
+    - **sample_number**: If not provided, a unique sample number will be generated
+    - **sample_batch_number**: If not provided, a unique batch number will be generated
     - **taken_at**: If not provided, it will be set to the creation time of the source file
 
     ### Returns:
@@ -52,23 +53,13 @@ async def create_3dcm_job(data: utils.VdcmCreate, db: Session = Depends(models.g
     - **HTTPException**: 400 error if task with same ID already exists
     - **HTTPException**: 400 error if source file does not exist
     """
-    if not data.no:
-        # Generate a unique ID for the job
-        hex_digest = hashlib.sha256(str(data.__dict__).encode()).hexdigest()
-        data.no = "P{:05d}_{:02d}_{}_{}".format(
-            int(hex_digest[:5], 16) % 100000,
-            int(hex_digest[-3:], 16) % 100,
-            data.sample_batch_number,
-            data.sample_number
-        )
+    data.generate_missing_fields()
 
     job: models.VdcmJobs = db.query(models.VdcmJobs).filter(models.VdcmJobs.no == data.no).first()
     # Check if job already exists
     if job:
-        raise HTTPException(
-            status_code=400,
-            detail=_("Task with no %(no)s already exists. Duplicate tasks are not allowed.") % {"no": data.no}
-        )
+        raise HTTPException(status_code=400,detail=_("Task with no %(no)s already exists. "
+                                                     "Duplicate tasks are not allowed.") % {"no": data.no})
 
     # Check if source file exists
     if not Path(data.src_path).exists():
@@ -80,7 +71,7 @@ async def create_3dcm_job(data: utils.VdcmCreate, db: Session = Depends(models.g
         data.taken_at = datetime.fromtimestamp(stat.st_ctime).date()
 
     # Create destination folder for reconstruction output
-    dest_path = Path(os.getenv('STATIC_DIR', "static")) / "3dcm" / data.no
+    dest_path = Path(os.getenv('STATIC_DIR', "static")) / "croppheno" / data.no
     log_output_dir = dest_path / "output"
     runtime_log_file = log_output_dir / "runtime.log"
     app_log_file = log_output_dir / "app.log"
@@ -93,8 +84,8 @@ async def create_3dcm_job(data: utils.VdcmCreate, db: Session = Depends(models.g
     task = tasks.reconstruction.delay(
         no=data.no,
         src_path=data.src_path,
-        runtime_log_file=str(runtime_log_file.resolve()),
-        app_log_file=str(app_log_file.resolve()),
+        runtime_log_file=str(runtime_log_file),
+        app_log_file=str(app_log_file),
         dest_folder=str(dest_path)
     )
     logging.info("Created reconstruction task %s, status: %s", task.id, task.status)
@@ -309,6 +300,8 @@ async def remove_job_by_no(
         try:
             client = docker.from_env()
             container = client.containers.get(job.container_id)
+            print(container)
+
             container.remove(force=True)
             logger.info("Removed container: %s", container.id)
         except APIError:
@@ -405,49 +398,3 @@ def upload_report(
     db.refresh(new_upload_task)
 
     return new_upload_task
-
-
-@router.put('/jobs/{no}')
-async def update_job(
-        no: str,
-        job_update: utils.VdcmBase,
-        db: Session = Depends(models.get_database)
-):
-    """
-    ### Update a VDCM job
-
-    This endpoint updates an existing VDCM job:
-    1. Finds the job in the database using the task ID
-    2. Validates that the job exists
-    3. Updates only the allowed job fields with the provided data
-    4. Commits the changes to the database
-
-    ### Parameters:
-    - **no**: The ID of the task to update
-    - **job_update**: VdcmUpdate model containing updated job information (only title and frame_count can be updated)
-    - **db**: Database session dependency
-
-    ### Returns:
-    - **VdcmJobs**: The updated job object
-
-    ### Raises:
-    - **HTTPException**: 404 error if task with specified ID does not exist
-    """
-    job: models.VdcmJobs = db.query(models.VdcmJobs).filter(models.VdcmJobs.no == no).first()
-
-    # Check if job exists
-    if not job:
-        raise HTTPException(status_code=404, detail=_("Task with no %(no)s does not exist.") % {"no": no})
-
-    job.title = job_update.title
-    job.sample_number = job_update.sample_number
-    job.sample_batch_number = job_update.sample_batch_number
-
-    # Update the updated_at timestamp
-    job.update_at = datetime.now()
-    
-    # Commit changes to database
-    db.commit()
-    db.refresh(job)
-
-    return job

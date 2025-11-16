@@ -1,18 +1,27 @@
 {
-  "pipeline": {
-    "num_threads": 8,
-    "use_gpu": true,
-    "undistort_max_image_size": 2048,
-    "birefnet_model": "ckpt/BiRefNet-general-epoch_244.pth",
-    "yolo_model": "ckpt/best.pt"
+  "image_extensions": [".jpg", ".jpeg", ".png", ".bmp", ".webp", ".jp2"],
+  "birefnet": {
+    "model": "ckpt/BiRefNet-general-epoch_244.pth",
+    "image_size": [
+      1024,
+      1024
+    ]
+  },
+  "yolo": {
+    "model": "ckpt/best.pt",
+    "confidence": 0.9,
+    "iou_threshold": 0.7,
+    "imgsz": 640,
+    "classes": [
+      1
+    ]
   },
   "feature_extraction": {
     "single_camera": 1,
     "camera_model": "OPENCV",
-    "max_image_size": 4096,
-    "peak_threshold": 0.006,
-    "edge_threshold": 10,
-    "max_num_features": 16384
+    "peak_threshold": 0.001,
+    "edge_threshold": 20,
+    "max_num_features": 32768
   },
   "exhaustive_matcher": {
     "max_ratio": 0.8,
@@ -36,15 +45,7 @@
     "filter_max_reproj_error": 4.0,
     "filter_min_tri_angle": 1.5
   },
-  "yolo_detection": {
-    "confidence": 0.9,
-    "iou_threshold": 0.7,
-    "imgsz": 640,
-    "classes": [
-      1
-    ]
-  },
-  "pc_3d_algos": {
+  "pheno_algos": {
     "ransac_threshold": 0.01,
     "max_iterations": 1000,
     "min_samples": 3,

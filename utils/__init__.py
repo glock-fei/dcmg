@@ -26,6 +26,6 @@ from .cersdm import (
     clean_filename,
 
 )
-from .cevdcm import VdcmBase, VdcmCreate, JobType, ErrorLevel, LogEntry, ErrorLogAnalyzer
+from .cevdcm import VdcmCreate, JobType, ErrorLevel, LogEntry, ErrorLogAnalyzer, get_docker_resource_path
 from .radiometric import get_surface_reflectance, Radiometric, Sampling, get_dn_values_in_polygon, QuadratBase
 from .cedoke import generate_run_id

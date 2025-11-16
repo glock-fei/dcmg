@@ -181,7 +181,7 @@ async def retrieve_or_create_sampling_records(data: utils.Sampling, db: Session 
         return sampling_record
 
     # If no sampling record exists, create a new one using the model method
-    return models.OdmSamplingRecord.create_record(db, report.job_id, report.id, data.title)
+    return models.OdmSamplingRecord.create_record(db, report_job.job_id, report_job.id, data.title)
 
 
 @router.post('/samplings/{sampling_id}/statistics', status_code=status.HTTP_202_ACCEPTED)
@@ -303,10 +303,13 @@ async def export_sampling_record_to_excel(sampling_id: int, filename: Optional[s
 
     from utils.sampling_data_exporter import generate_excel
     output = generate_excel(quadrat_records)
-    
+
+    import urllib.parse
     filename = utils.clean_filename(filename)
+    filename = urllib.parse.quote(filename if filename else sampling_record.title)
+
     headers = {
-        'Content-Disposition': f'attachment; filename="{filename if filename else sampling_record.title}.xlsx"'
+        'Content-Disposition': f'attachment; filename="{filename}.xlsx"'
     }
     
     return StreamingResponse(

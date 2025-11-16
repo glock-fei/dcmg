@@ -1,5 +1,8 @@
 import json
-from datetime import date
+import os
+import random
+import time
+from datetime import date, datetime
 from enum import Enum
 from pathlib import Path
 from typing import List, Optional, Tuple
@@ -15,24 +18,44 @@ class JobType(str, Enum):
     IMAGE = 'IMAGE'
 
 
-class VdcmBase(BaseModel):
-    """
-    VDCM base model containing common fields
-    """
-    title: str = Field(None, min_length=1, max_length=255, description="Title of the job")
-    sample_number: str = Field(..., min_length=1, max_length=16, description="Sample number identifier")
-    sample_batch_number: str = Field(..., min_length=1, max_length=16, description="Batch number for sample group")
-
-
-class VdcmCreate(VdcmBase):
+class VdcmCreate(BaseModel):
     """
     VDCM model for creating new jobs
     """
-    no: str = Field(None, min_length=1, max_length=32, description="Unique record identifier")
+    title: str = Field(None, min_length=1, max_length=255, description="Title of the job")
+    sample_number: Optional[str] = Field(None, min_length=1, max_length=16, description="Sample number identifier")
+    sample_batch_number: Optional[str] = Field(None, min_length=1, max_length=16,
+                                               description="Batch number for sample group")
+    no: Optional[str] = Field(None, min_length=1, max_length=32, description="Unique record identifier")
+
     job_type: JobType = Field(..., description="Type of job - VIDEO or IMAGE")
     src_path: str = Field(..., min_length=1, max_length=255, description="Source path of the media file")
     taken_at: date = Field(None, description="Timestamp when media was captured")
     frame_count: int = Field(default=150, ge=150, description="Number of frames in the media file")
+
+    def generate_missing_fields(self):
+        """
+        Generate missing fields with default values if they are not provided.
+        This method will modify the instance in place.
+        """
+        if not self.sample_number:
+            self.sample_number = datetime.now().strftime('%H%M%S')
+
+        if not self.sample_batch_number:
+            self.sample_batch_number = str(random.randint(10, 99))
+
+        if not self.no:
+            self.no = "P{}_{}_{}_{}".format(
+                datetime.now().strftime('%Y%m%d'),
+                random.randint(1, 9),
+                self.sample_number,
+                self.sample_batch_number
+            )
+
+        if not self.title:
+            self.title = self.no
+
+        return self
 
 
 class ErrorLevel(Enum):
@@ -49,6 +72,25 @@ class LogEntry:
     level: ErrorLevel
     message: str
     raw_line: str
+
+
+def get_docker_resource_path(relative_path):
+    """
+    Get the correct path for docker resources whether running in container or host.
+
+    Args:
+        relative_path (str): Relative path from docker directory
+
+    Returns:
+        Path: Correct path for the resource
+    """
+    # Check if we're running inside a container by checking for the docker socket
+    if Path("/.dockerenv").exists() or Path("/app/docker").exists():
+        # Running inside container, use the shared volume path
+        return Path("/app/docker") / relative_path
+    else:
+        # Running on host, use the local path
+        return Path(os.getcwd()) / "docker" / relative_path
 
 
 class ErrorLogAnalyzer:

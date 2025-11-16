@@ -16,7 +16,7 @@
     },
     "OutOfMemoryError": {
         "pattern": "OutOfMemory|out of memory.*error|MemoryError|killed.*memory|OOM.*error",
-        "message": "处理数据量太大，请减少图片数量或等待服务器空闲时有更大内存再重试。",
+        "message": "处理数据量太大，请减少图片数量或降低图片清晰度后重试。",
         "level": "CRITICAL"
     },
     "ColmapNoFeaturesError": {
@@ -74,29 +74,9 @@
         "message": "云端资源文件解压异常，请检查压缩包是否损坏，再重试。",
         "level": "ERROR"
     },
-    "DockerContainerNotFoundError": {
-        "pattern": "can not get logs from container which is dead or marked for removal|Client Error.*container.*not found|Conflict.*container.*dead or marked for removal|No such container",
-        "message": "运行时异常，容器被强制断开，请重启电脑后再重试。",
-        "level": "ERROR"
-    },
-    "DockerContainerAbortedError": {
-        "pattern": "TaskRevokedError|Task was canceled by user|task.*revoked|task.*aborted",
-        "message": "任务已被用户中止。",
-        "level": "WARNING"
-    },
-    "DockerContainerExitError": {
-        "pattern": "Docker container exited with non-zero exit code|container.*exit.*code.*[1-9]",
-        "message": "运行时异常，容器执行过程中发生错误，请重启电脑后再重试。",
-        "level": "ERROR"
-    },
-    "Open3DMeshNotWatertightError": {
-        "pattern": "Open3D Error.*The mesh is not watertight, and the volume cannot be computed|mesh is not watertight",
-        "message": "三维表型提取失败，请改善图片质量或增加图片数量再重试。",
-        "level": "ERROR"
-    },
-    "CudaNotFoundError": {
-        "pattern": "Found no NVIDIA driver on your system|CUDA out of memory|CUDA error|no NVIDIA GPU",
-        "message": "系统未检测到NVIDIA GPU或驱动程序，请重启电脑后再重试。",
+    "Open3DNotWatertightError": {
+        "pattern": "The mesh is not watertight, and the volume cannot be computed|Open3D Error.*TriangleMesh.*GetVolume|mesh is not watertight",
+        "message": "三维网格模型重建失败，无法计算体积参数，请改善图片质量或增加图片数量。",
         "level": "ERROR"
     }
 }

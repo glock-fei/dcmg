@@ -95,6 +95,8 @@ The application can be deployed using Docker Compose which includes all necessar
 docker-compose build --no-cache
 
 # Start all services in detached mode
+UID=$(id -u) GID=$(id -g) docker-compose up -d
+# or
 docker-compose up -d
 ```
 

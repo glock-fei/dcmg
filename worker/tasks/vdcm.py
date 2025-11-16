@@ -7,6 +7,7 @@ import subprocess
 from datetime import datetime
 from pathlib import Path
 from typing import Optional, Dict, Any, Tuple
+import platform
 
 import docker
 from celery.contrib.abortable import AbortableTask
@@ -237,10 +238,10 @@ def reconstruction(
         dict: Status dictionary containing state and potential error information
     """
     # Initialize status tracking object with running state
-    work_dir = Path(os.getcwd())
+    work_dir = Path(os.getenv("HOST_DIR", os.getcwd()))
     report_info = {}
     state_base = utils.StateBase(state=utils.OdmJobStatus.uploading.value)
-    log_analyzer = utils.ErrorLogAnalyzer(str(work_dir / "docker/3dcm/patterns.json"))
+    log_analyzer = utils.ErrorLogAnalyzer(Path(os.getcwd()) / "docker/3dcm/patterns.json")
     container = None
 
     try:
@@ -250,11 +251,10 @@ def reconstruction(
 
         # Prepare command for 3DCM reconstruction
         command = [
-            "./3dcm",
-            "--rmbg",  # Enable background removal
-            "--extract_phenotype",  # Enable phenotype extraction
-            "--birefnet_use_enhance",  # Use enhanced background removal
-            "--resize_scale", "0.5"  # Scale images to 50% for processing
+            "./start", "--rmbg", "--use-gpu",
+            "--extract-phenotype",
+            "--birefnet-use-enhance",
+            "--resize-scale", "0.3"
         ]
 
         # Process input based on whether it's a single file or directory
@@ -262,7 +262,7 @@ def reconstruction(
             # Handle single video file input
             shutil.copy(src_file, images_dir)
             command.extend([
-                "--video_file",
+                "--video-file",
                 "/app/images/" + src_file.name,  # Path inside Docker container
                 "--frame_count", str(frame_count)
             ])
@@ -279,20 +279,26 @@ def reconstruction(
 
         # Initialize Docker client for container management
         client = docker.from_env()
+        
+        # Determine user parameter based on the platform
+        user_param = None
+        if platform.system() != "Windows":
+            user_param = os.getuid()
+        
         # Execute 3DCM reconstruction in Docker container
         container = client.containers.run(
             image=dc_image,
             command=command,
             shm_size=os.getenv("3DCM_SHM_SIZE", "8G"),
             device_requests=[DeviceRequest(count=1, capabilities=[["gpu"]])],
-            environment={"3DCM_PROGRESS_URL": progress_url, "3DCM_NO": no},
+            environment={"3DCM_PROGRESS_URL": progress_url, "3DCM_NO": no, "PRIVATE_KEY": os.getenv("3DCM_PRIVATE_KEY")},
             extra_hosts={service_host_gateway: "host-gateway"},
-            user=os.getuid(),  # Run container with current user's UID and GID
+            user=user_param,  # Run container with current user's UID and GID on non-Windows platforms
             detach=True,
             remove=False,
             volumes={
-                str(app_log_file): {"bind": "/app/app.log", "mode": "rw"},
-                str(images_dir.resolve()): {"bind": "/app/images", "mode": "rw"},
+                str(work_dir / app_log_file): {"bind": "/app/app.log", "mode": "rw"},
+                str(work_dir / images_dir): {"bind": "/app/images", "mode": "rw"},
                 str(work_dir / "docker/3dcm/config.json"): {"bind": "/app/config.json", "mode": "rw"},
                 str(work_dir / "docker/3dcm/license"): {"bind": "/app/license", "mode": "ro"},
                 str(work_dir / "docker/3dcm/utils.py"): {"bind": "/app/utils.py", "mode": "rw"}
