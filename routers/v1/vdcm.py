@@ -73,38 +73,34 @@ async def create_croppheno_job(data: utils.VdcmCreate, db: Session = Depends(mod
     # Create destination folder for reconstruction output
     dest_path = Path(os.getenv('STATIC_DIR', "static")) / "croppheno" / data.no
     log_output_dir = dest_path / "output"
-    runtime_log_file = log_output_dir / "runtime.log"
     app_log_file = log_output_dir / "app.log"
 
     log_output_dir.mkdir(parents=True, exist_ok=True)
-    runtime_log_file.touch()
     app_log_file.touch()
 
     # Create reconstruction task
     task = tasks.reconstruction.delay(
         no=data.no,
         src_path=data.src_path,
-        runtime_log_file=str(runtime_log_file),
         app_log_file=str(app_log_file),
-        dest_folder=str(dest_path)
+        dest_folder=str(dest_path),
+        frame_count=data.frame_count
     )
     logging.info("Created reconstruction task %s, status: %s", task.id, task.status)
 
-    # Create a new RSDM job record
-    new_3dcm_job = models.VdcmJobs(
+    # save job information to the database
+    new_croppheno_job = models.VdcmJobs(
         **data.dict(),
         dest_path=str(dest_path),
         celery_task_id=task.id,
         state=utils.OdmJobStatus.pending.value,
-        log_file=str(runtime_log_file)
+        log_file=str(app_log_file)
     )
-
-    # Add the new job to the database
-    db.add(new_3dcm_job)
+    db.add(new_croppheno_job)
     db.commit()
-    db.refresh(new_3dcm_job)
+    db.refresh(new_croppheno_job)
 
-    return new_3dcm_job
+    return new_croppheno_job
 
 
 @router.patch('/jobs/{no}/progress')
@@ -192,13 +188,9 @@ async def get_jobs(
     for job in data:
         # If job has uploads, update progress from Celery task state
         if job.uploads:
-            # Get the Celery task associated with the upload
             task = AbortableAsyncResult(job.uploads.celery_task_id)
-            # Check if task exists and has result data
             if task.name and task.worker and task.result:
-                # Parse task result to get current state and progress information
                 current_state = utils.OdmUploadState(**task.result)
-                # Calculate total progress and round to 2 decimal places
                 job.uploads.progress = round(sum(current_state.total_progress.values()), 2)
 
         result.append(job)

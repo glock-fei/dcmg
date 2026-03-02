@@ -211,7 +211,6 @@ def reconstruction(
         no: str,
         src_path: str,
         dest_folder: str,
-        runtime_log_file: str,
         app_log_file: str,
         frame_count: int = 150,
 ) -> Dict[str, Any]:
@@ -230,7 +229,6 @@ def reconstruction(
         no (str): Unique identifier for the job
         src_path (str): Path to source file or directory containing input media
         dest_folder (str): Path to destination folder for output files
-        runtime_log_file (str): Path to runtime log file for Celery task
         app_log_file (str): Path to app log file for Docker container
         frame_count (int): Number of frames to extract from input video (default: 150)
 
@@ -264,7 +262,7 @@ def reconstruction(
             command.extend([
                 "--video-file",
                 "/app/images/" + src_file.name,  # Path inside Docker container
-                "--frame_count", str(frame_count)
+                "--frame-count", str(frame_count)
             ])
         else:
             # Handle directory of image files input
@@ -273,31 +271,34 @@ def reconstruction(
                 shutil.copy(image_path, images_dir)
 
         # Get required environment variables with validation
-        dc_image = os.getenv("3DCM_IMAGE")
-        progress_url = os.getenv("3DCM_PROGRESS_URL")
+        dc_image = os.getenv("CROP_PHENO_IMAGE")
+        progress_url = os.getenv("CROP_PHENO_PROGRESS_URL")
         service_host_gateway = os.getenv("SERVICE_HOST_GATEWAY")
 
         # Initialize Docker client for container management
         client = docker.from_env()
         
         # Determine user parameter based on the platform
-        user_param = None
-        if platform.system() != "Windows":
-            user_param = os.getuid()
+        urid = None
+        if platform.system() not in ["Windows"]:
+            urid = os.getuid()
         
         # Execute 3DCM reconstruction in Docker container
         container = client.containers.run(
             image=dc_image,
             command=command,
-            shm_size=os.getenv("3DCM_SHM_SIZE", "8G"),
+            shm_size=os.getenv("CROP_PHENO_SHM_SIZE", "8G"),
             device_requests=[DeviceRequest(count=1, capabilities=[["gpu"]])],
-            environment={"3DCM_PROGRESS_URL": progress_url, "3DCM_NO": no, "PRIVATE_KEY": os.getenv("3DCM_PRIVATE_KEY")},
+            environment={
+                "CROP_PHENO_PROGRESS_URL": progress_url,
+                "CROP_PHENO_NO": no,
+                "PRIVATE_KEY": os.getenv("CROP_PHENO_PRIVATE_KEY")
+            },
             extra_hosts={service_host_gateway: "host-gateway"},
-            user=user_param,  # Run container with current user's UID and GID on non-Windows platforms
+            user=urid,
             detach=True,
             remove=False,
             volumes={
-                str(work_dir / app_log_file): {"bind": "/app/app.log", "mode": "rw"},
                 str(work_dir / images_dir): {"bind": "/app/images", "mode": "rw"},
                 str(work_dir / "docker/3dcm/config.json"): {"bind": "/app/config.json", "mode": "rw"},
                 str(work_dir / "docker/3dcm/license"): {"bind": "/app/license", "mode": "ro"},
@@ -317,7 +318,7 @@ def reconstruction(
             logger.info("Updated container ID %s for task %s", container.id, no)
 
         # Stream logs from container and write to local log file
-        with open(runtime_log_file, "w", encoding="utf-8") as f:
+        with open(app_log_file, "w", encoding="utf-8") as f:
             for line in container.logs(stream=True, follow=True):
                 decoded_line = line.decode("utf-8")
                 f.write(decoded_line)
@@ -334,7 +335,7 @@ def reconstruction(
             raise Exception("reconstruction_task.error.docker_error: Docker container exited with non-zero exit code.")
 
         # Check for required files and validate their existence
-        required_files = _check_required_files(dest_path=str(images_dir), log_file=runtime_log_file)
+        required_files = _check_required_files(dest_path=str(images_dir), log_file=app_log_file)
         logger.info("Reconstruction completed for job %s", no)
 
         # Find cover image and count total images
@@ -370,7 +371,7 @@ def reconstruction(
         state_base.state = utils.OdmJobStatus.failed.value
         state_base.error = str(e)
         # Parse log file for error messages
-        log_analyzer.parse_log_file(runtime_log_file)
+        log_analyzer.parse_log_file(app_log_file)
         log_analyzer.parse_log_line(str(e))
         report_info["err_msg"] = _parse_log_file(analyzer=log_analyzer)
     finally:
@@ -558,7 +559,7 @@ def update_phenotype_report(
 
         logger.info("Sending scene result to server API")
         res = requests.post(
-            os.getenv("3DCM_UPLOAD_TO_CLOUD"),
+            os.getenv("CROP_PHENO_UPLOAD_TO_CLOUD"),
             headers={
                 "Content-Type": "application/json",
                 "token": token,

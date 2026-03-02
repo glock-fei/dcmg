@@ -104,7 +104,7 @@ class OdmJob(BaseModel):
     odm_job_type: OdmType
     odm_src_folder: str
     odm_samplinge_time: datetime
-    odm_host: str
+    odm_host: Optional[str] = None
     odm_create_at: datetime
     radiometric: Optional[list[list[Radiometric]]] = None
 
@@ -165,6 +165,10 @@ def find_images(src_folder: str, fot: OdmType):
                 result.append(str(path.resolve()))
 
     return result
+
+
+def get_odm_base_url(base_url: str):
+    return os.getenv("ODM_HOST", base_url).rstrip("/")
 
 
 def _callback_odm_api(project_id: int, task_id: str, api_url: str):
@@ -231,7 +235,7 @@ def remove_odm_task(project_id: int, task_id: str, base_url: str):
         requests.exceptions.RequestException: If the HTTP request fails
     """
     odm_remove_api = os.getenv('ODM_REMOVE_API', "/api/projects/#project_id#/tasks/#task_id#/remove/")
-    api_url = urljoin(base_url.rstrip("/") + "/", odm_remove_api)
+    api_url = urljoin(get_odm_base_url(base_url) + "/", odm_remove_api)
 
     return _callback_odm_api(project_id, task_id, api_url)
 
@@ -253,7 +257,7 @@ def commit_odm_task(project_id: int, task_id: str, base_url: str):
         The commit operation only executes when percent >= 100
     """
     odm_commit_api = os.getenv('ODM_COMMINT_API', "/api/projects/#project_id#/tasks/#task_id#/commit/")
-    api_url = urljoin(base_url.rstrip("/") + "/", odm_commit_api)
+    api_url = urljoin(get_odm_base_url(base_url) + "/", odm_commit_api)
 
     return _callback_odm_api(project_id, task_id, api_url)
 
@@ -272,7 +276,7 @@ def cancel_odm_task(project_id: int, task_id: str, base_url: str):
         The cancel operation only executes when percent < 100
     """
     odm_cancel_api = os.getenv('ODM_CANCEL_API', "/api/projects/#project_id#/tasks/#task_id#/cancel/")
-    api_url = urljoin(base_url.rstrip("/") + "/", odm_cancel_api)
+    api_url = urljoin(get_odm_base_url(base_url) + "/", odm_cancel_api)
 
     return _callback_odm_api(project_id, task_id, api_url)
 
@@ -334,9 +338,7 @@ def prepare_odm_output_structure(project_id: int, task_id: str, skip_creation: b
         Path: The absolute path to the reflector folder
 
     """
-    work_dir = Path(os.getcwd())
-    odm_dir = work_dir / os.getenv("STATIC_DIR", "static") / "odm"
-    output_dir = odm_dir / str(project_id) / task_id
+    output_dir = Path(os.getenv("STATIC_DIR", "static")) / "odm" / str(project_id) / task_id
     log_file = output_dir / "app.log"
     reflector_dest_dir = output_dir / "reflector"
 
@@ -349,7 +351,7 @@ def prepare_odm_output_structure(project_id: int, task_id: str, skip_creation: b
         log_file.touch()
     logger.info("save log to file: %s", log_file.resolve())
 
-    return output_dir.resolve(), log_file.resolve(), reflector_dest_dir.resolve()
+    return output_dir, log_file, reflector_dest_dir
 
 
 def get_content_length(url: str) -> int:
@@ -450,6 +452,39 @@ def get_odm_report_output_files(output_dir: str, output_files: dict, radiometric
 def get_odm_report_json(output_dir: str) -> Path:
     """
     Get the report.json file from the ODM processing.
+
+    template of report.json:
+    {
+    "run_id": "c8a5e6c67ff54093",
+    "start_time": 1763364251.30905,
+    "end_time": 1763364274.9942257,
+    "report": [{
+            "file_name": "odm_orthophoto.tif",
+            "file_size": 79458334,
+            "area_mu": 27.3745,
+            "band": {
+                "R": {
+                    "tif": "band/R.tif",
+                    "tfw": "band/R.tfw"
+                }
+            },
+            "vegetation": [
+                {
+                    "min": -1.0,
+                    "max": 0.75,
+                    "mean": -0.01,
+                    "stddev": 0.22,
+                    "output": {
+                        "png": "gndvi/GNDVI.png",
+                        "tif": "gndvi/GNDVI.tif",
+                        "tfw": "images/output/gndvi/GNDVI.tfw"
+                    },
+                    "report": [],
+                    "name": "gndvi"
+                }
+            ]
+        }]
+    }
     """
     return Path(output_dir) / "report.json"
 
@@ -502,9 +537,8 @@ def clean_filename(filename):
 
 def commint_report(
         commint_report_api: str,
-        token: str,
-        cid: str,
         report_no: str,
+        setting_headers: dict,
         all_zip_url: str
 ):
     """
@@ -513,14 +547,14 @@ def commint_report(
 
     Args:
         commint_report_api (str): The API endpoint URL to commit the report
-        token (str): The token to authenticate the request
         report_no (str): The report number to commit
-        cid (str): The client ID to authenticate the request
+        setting_headers (dict): The headers to include in the commit request
         all_zip_url (str): The URL of the all.zip report to commit
     """
+
     with requests.post(
             commint_report_api,
-            headers={"token": token, "cid": cid},
+            headers=setting_headers,
             json={
                 "report_no": report_no,
                 "resource_files": {
@@ -539,3 +573,22 @@ def commint_report(
                     'error_code': r.status_code,
                     'error_message': response.get('msg', _('Unknown error'))
                 })
+
+
+def get_basic_headers():
+    """
+    Get the basic headers
+    """
+    get_headers_api = os.getenv("BASICE_API_BASE_URL", "http://localhost:5000") + "/api/devices/is-activated"
+    headers = {}
+
+    try:
+        with requests.Session() as session:
+            r = session.get(get_headers_api, timeout=5)
+
+            r.raise_for_status()
+            rsg = r.json()
+
+            headers = rsg.get("extra", {}).get("header", {})
+    finally:
+        return headers

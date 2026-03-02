@@ -1,8 +1,8 @@
 """add quadrat statistics table
 
-Revision ID: ccb413dbdf80
+Revision ID: 750d468cc4bb
 Revises: 81d8e7772333
-Create Date: 2025-11-12 17:22:27.647991
+Create Date: 2025-11-17 17:30:04.562602
 
 """
 from typing import Sequence, Union
@@ -12,7 +12,7 @@ import sqlalchemy as sa
 
 
 # revision identifiers, used by Alembic.
-revision: str = 'ccb413dbdf80'
+revision: str = '750d468cc4bb'
 down_revision: Union[str, Sequence[str], None] = '81d8e7772333'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
@@ -45,6 +45,7 @@ def upgrade() -> None:
     sa.Column('id', sa.Integer(), nullable=False),
     sa.Column('sampling_id', sa.Integer(), nullable=False),
     sa.Column('run_id', sa.String(length=16), nullable=False),
+    sa.Column('idx', sa.String(length=16), nullable=True, comment='Quadrat index in the image'),
     sa.Column('name', sa.String(length=255), nullable=True),
     sa.Column('coords', sa.JSON(), nullable=False),
     sa.Column('center', sa.JSON(), nullable=False),

@@ -262,6 +262,7 @@ class OdmQuadrat(Base):
     sampling_id = Column(Integer, ForeignKey("odm_sampling_records.id"), nullable=False, index=True)
     run_id = Column(String(16), nullable=False, index=True)
 
+    idx = Column(String(16), nullable=True, comment="Quadrat index in the image")
     name = Column(String(255), nullable=True)
     coords = Column(JSON, nullable=False)
     center = Column(JSON, nullable=False)

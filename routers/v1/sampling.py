@@ -1,4 +1,5 @@
 import logging
+from pathlib import Path
 from typing import Optional
 
 from fastapi import APIRouter, Depends, status
@@ -113,6 +114,7 @@ async def get_sampling_record_with_statistics(sampling_id: int, latest_only: boo
         sampling_record.error = odm_state.error
 
     quadrat_query = db.query(models.OdmQuadrat).filter(models.OdmQuadrat.sampling_id == sampling_id)
+    quadrat_query = quadrat_query.filter(models.OdmQuadrat.is_deleted == 0)
     quadrat_query = quadrat_query.options(selectinload(models.OdmQuadrat.statistics))
 
     if latest_only:
@@ -228,6 +230,7 @@ async def initiate_sampling_statistics(
             sampling_id=sampling_record.id,
             run_id=latest_run_id,
             name=quadrat.name,
+            idx=quadrat.idx,
             coords=quadrat.coords,
             center=quadrat.center
         )
@@ -277,16 +280,20 @@ async def delete_sampling_record(
 
 
 @router.get('/samplings/{sampling_id}/export_to_excel')
-async def export_sampling_record_to_excel(sampling_id: int, filename: Optional[str] = None, db: Session = Depends(get_database)):
+async def export_sampling_record_to_excel(sampling_id: int, filename: Optional[str] = None,
+                                          stream: bool = False,
+                                          db: Session = Depends(get_database)):
     """
-    Export sampling record statistics to Excel file and return as streaming response
+    Export sampling record statistics to Excel file and return as streaming response or file path
 
     ### Parameters
     - **sampling_id** (integer): The ID of the sampling record
     - **filename** (string, optional): The filename for the exported file. Defaults to the title of the sampling record.
+    - **stream** (boolean, optional): Whether to return the file as a streaming response. Defaults to False.
 
     ### Returns
-    - **StreamingResponse**: The Excel file as a streaming response.
+    - **StreamingResponse**: The Excel file as a streaming response (when return_type="stream").
+    - **dict**: Dictionary with file path (when return_type="file").
 
     ### Raises
     - **HTTPException**: 404 Not Found if the sampling record doesn't exist
@@ -299,6 +306,7 @@ async def export_sampling_record_to_excel(sampling_id: int, filename: Optional[s
     quadrat_query = db.query(models.OdmQuadrat).options(selectinload(models.OdmQuadrat.statistics))
     quadrat_query = quadrat_query.filter(models.OdmQuadrat.sampling_id == sampling_id)
     quadrat_query = quadrat_query.filter(models.OdmQuadrat.run_id == sampling_record.latest_run_id)
+    quadrat_query = quadrat_query.filter(models.OdmQuadrat.is_deleted == 0)
     quadrat_records = quadrat_query.all()
 
     from utils.sampling_data_exporter import generate_excel
@@ -307,13 +315,44 @@ async def export_sampling_record_to_excel(sampling_id: int, filename: Optional[s
     import urllib.parse
     filename = utils.clean_filename(filename)
     filename = urllib.parse.quote(filename if filename else sampling_record.title)
+    filename = filename + ".xlsx"
 
-    headers = {
-        'Content-Disposition': f'attachment; filename="{filename}.xlsx"'
-    }
-    
-    return StreamingResponse(
-        output,
-        headers=headers,
-        media_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
-    )
+    if stream:
+        return StreamingResponse(
+            output,
+            headers={'Content-Disposition': f'attachment; filename={filename}'},
+            media_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+        )
+
+    xlsx_path = Path(sampling_record.report.output_dir) / filename
+    # Save file to disk and return file path
+    with open(xlsx_path, "wb") as f:
+        f.write(output.getvalue())
+
+    return str(xlsx_path)
+
+
+@router.delete('/samplings/{sampling_id}/quadrat/{quadrat_id}', status_code=status.HTTP_204_NO_CONTENT)
+async def delete_quadrat_record(
+        sampling_id: int,
+        quadrat_id: int,
+        db: Session = Depends(get_database)
+):
+    """
+    ## Delete a quadrat record
+
+    Mark a specific quadrat record as deleted.
+    """
+    quadrat_query = db.query(models.OdmQuadrat).filter(models.OdmQuadrat.id == quadrat_id)
+    quadrat_query = quadrat_query.filter(models.OdmQuadrat.sampling_id == sampling_id)
+
+    quadrat_record = quadrat_query.first()
+
+    if not quadrat_record:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=_('Quadrat record not found')
+        )
+
+    quadrat_record.is_deleted = True
+    db.commit()

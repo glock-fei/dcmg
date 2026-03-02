@@ -15,7 +15,7 @@ def send_progress(percent: float):
         percent: float, progress percentage.
     """
     try:
-        with requests.patch(os.getenv("3DCM_PROGRESS_URL").replace("%job_no%", os.getenv("3DCM_NO")),
+        with requests.patch(os.getenv("CROP_PHENO_PROGRESS_URL").replace("%job_no%", os.getenv("CROP_PHENO_NO")),
                             params={"percent": percent},
                             timeout=(1, 1)) as res:
             res.raise_for_status()

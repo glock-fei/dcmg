@@ -94,6 +94,9 @@ The application can be deployed using Docker Compose which includes all necessar
 # Build the Docker images
 docker-compose build --no-cache
 
+export ODM_DATA_DIR=E:/home/sumfenaipc/docker/odm
+export USB_DATA_DIR=E:/home/sumfenaipc/sumfenpro/picture
+
 # Start all services in detached mode
 UID=$(id -u) GID=$(id -g) docker-compose up -d
 # or
