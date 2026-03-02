@@ -167,13 +167,14 @@ def copy_image_to_odm(
             copied_step += 1
 
             percentage = (Decimal(copied_step) / Decimal(total_files)) * 100
+
+            if int(percentage) - int(odm_state.progress) == 10:
+                logger.info("Copying image %d/%d (%.2f%%)", copied_step, total_files, odm_state.progress)
+
             odm_state.progress = float(percentage.quantize(Decimal('0.01'), rounding=ROUND_DOWN))
 
             self.update_state(meta=odm_state.dict())
-            if int(odm_state.progress) % 10 == 0:
-                logger.info("Copying image %d/%d (%.2f%%)", copied_step, total_files, odm_state.progress)
-
-            time.sleep(0.3)
+            time.sleep(0.1)
     except Exception as e:
         logger.error("Error copying image: %s", e)
         odm_state.state = utils.OdmJobStatus.failed.value
@@ -202,8 +203,7 @@ def upload_odm_report_to_cloud(
         output_dir: str,
         odm_host: str,
         report_no: str,
-        cid: str,
-        token: str
+        setting_headers: dict
 ):
     """
     Update ODM report by downloading from ODM server and uploading to OSS.
@@ -220,8 +220,7 @@ def upload_odm_report_to_cloud(
         output_dir (str): The output directory for the ODM report
         odm_host (str): ODM server host URL
         report_no (str): Report number
-        cid (str): company ID
-        token (str): clound service token
+        setting_headers (dict): headers for cloud service
 
     Process:
         1. Initialize OSS client with credentials
@@ -247,7 +246,11 @@ def upload_odm_report_to_cloud(
         logger.info("%s Initialize oss client %s", "▪ " * 15, "▪ " * 15)
 
         # Handle all.zip file progress tracking
-        odm_all_zip_url = f"{odm_host}/api/projects/{project_id}/tasks/{task_id}/download/all.zip"
+        odm_all_zip_url = "{}/api/projects/{}/tasks/{}/download/all.zip".format(
+            utils.get_odm_base_url(odm_host),
+            project_id,
+            task_id
+        )
         odm_all_zip_size = utils.get_content_length(odm_all_zip_url)
 
         # Initialize progress tracking for fixed entries and all files
@@ -307,9 +310,8 @@ def upload_odm_report_to_cloud(
         # Commit report to online
         utils.commint_report(
             commint_report_api=os.getenv("DOM_COMMIT_REPORT_API"),
-            token=token,
-            cid=cid,
             report_no=report_no,
+            setting_headers=setting_headers,
             all_zip_url=os.getenv("OSS_DOMAIN").rstrip("/") + "/" + zip_oss_url
         )
         odm_update_state.total_progress[utils.ProgressKeys.COMMIT_REPORT.value] = (5, 5)
@@ -341,7 +343,7 @@ def generate_odm_report(
         output_dir,
         reflector_dest_dir,
         orthophoto_tif,
-        log_file
+        runtime_log_file: str
 ):
     """
     Generate an ODM report using a Docker container.
@@ -358,7 +360,7 @@ def generate_odm_report(
         output_dir (str): Local output directory path
         reflector_dest_dir (str): Destination directory for reflector images
         orthophoto_tif (str): Path to orthophoto TIF file
-        log_file (str): Path to log file
+        runtime_log_file (str): Path to log file
 
     Process:
         1. Sets up directory structure for input/output files
@@ -381,42 +383,72 @@ def generate_odm_report(
     state_base = utils.StateBase(state=utils.OdmJobStatus.running.value)
 
     try:
-        import platform
-        work_dir = Path(os.getcwd())
+        work_dir = Path(os.getenv("HOST_DIR", os.getcwd()))
+
         output_dir = Path(output_dir)
         logger.info("Starting ODM report generation from %s to %s", orthophoto_tif, output_dir)
-        # Initialize Docker client
-        client = docker.from_env()
         # set en variables for docker container
         envs = {
             "ODM_SAVE_REPORT_API": os.getenv("ODM_SAVE_REPORT_API"),
             "ODM_PROJECT_ID": project_id,
-            "ODM_TASK_ID": task_id
+            "ODM_TASK_ID": task_id,
+            "PRIVATE_KEY": os.getenv("RSDM_PRIVATE_KEY")
         }
         if filename_base := utils.clean_filename(odm_job_name):
             envs["FILENAME_BASE"] = filename_base
 
         # Update state
         self.update_state(meta=state_base.dict())
+
+        # Determine user parameter based on the platform
+        urid = None
+        # Only set user for non-Windows platforms to avoid permission issues
+        # On Linux/Mac, we set the user to ensure proper file ownership
+        # On Windows, we skip setting user to avoid PermissionError with app.log
+        import platform
+        if platform.system() not in ["Windows"]:
+            urid = os.getuid()
+
+        client = docker.from_env()
         # Run the RSDM Docker container to generate the report
-        client.containers.run(
-            detach=False,
-            remove=True,
+        if os.getenv("MOUNT_ODM_DIR") or os.getenv("ODM_DATA_DIR"):
+            orthophoto_tif = Path(os.getenv("ODM_DATA_DIR")) / Path(orthophoto_tif).relative_to(os.getenv("MOUNT_ODM_DIR"))
+
+        container = client.containers.run(
+            detach=True,
+            remove=False,
             image=os.getenv("RSDM_IMAGE"),
             command=["./start"],
-            user=os.getuid(),
+            user=urid,
             environment=envs,
             extra_hosts={os.getenv("SERVICE_HOST_GATEWAY"): "host-gateway"},
             volumes={
-                str(Path(orthophoto_tif).absolute()): {"bind": "/app/images/odm_orthophoto.tif", "mode": "ro"},
-                log_file: {"bind": "/app/app.log", "mode": "rw"},
-                str(Path(reflector_dest_dir).absolute()): {"bind": "/app/reflector", "mode": "rw"},
-                str(output_dir.absolute()): {"bind": "/app/images/output", "mode": "rw"},
+                str(orthophoto_tif): {"bind": "/app/images/odm_orthophoto.tif", "mode": "ro"},
+                str(work_dir / reflector_dest_dir): {"bind": "/app/reflector", "mode": "rw"},
+                str(work_dir / output_dir): {"bind": "/app/images/output", "mode": "rw"},
                 str(work_dir / "docker/rsdm/algos.json"): {"bind": "/app/algos.json", "mode": "rw"},
                 str(work_dir / "docker/rsdm/license"): {"bind": "/app/license", "mode": "ro"},
                 str(work_dir / "docker/rsdm/utils.py"): {"bind": "/app/utils.py", "mode": "rw"}
             }
         )
+        # Stream logs from container and write to local log file
+        with open(runtime_log_file, "w", encoding="utf-8") as f:
+            for line in container.logs(stream=True, follow=True):
+                decoded_line = line.decode("utf-8")
+                f.write(decoded_line)
+                f.flush()  # Ensure immediate write to file
+
+                # Check if task is aborted
+                if self.is_aborted():
+                    from celery.exceptions import TaskRevokedError
+                    container.stop(timeout=5)
+                    raise TaskRevokedError("Task was canceled by user")
+
+        # Wait for container to finish and check exit code
+        run_status = container.wait()
+        if run_status.get("StatusCode") != 0:
+            raise Exception("odm.generate_report_task.error.docker_error: Docker container exited with non-zero exit code.")
+
         logger.info("ODM report generation complete.")
         state_base.state = utils.OdmJobStatus.completed.value
     except Exception as e:
@@ -604,7 +636,7 @@ def sampling_statistics(
                     # Update progress more accurately
                     sampling_state.progress = round(current_progress / total_progress * 100, 2)
                     self.update_state(meta=sampling_state.dict())
-                    time.sleep(1)
+                    # time.sleep(1)
 
         logger.info("Completed processing all quadrats for all algorithms. Total records: %d", len(records))
         # save sampling statistics to database

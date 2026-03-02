@@ -72,29 +72,6 @@ async def get_odm_jobs(
     - **odm_job_name**: Human-readable job name
     - **odm_src_folder**: Data storage path
     - ...other fields...
-
-    ### Example
-    ```json
-    [{
-      "id": 1,
-      "odm_project_id": 1,
-      "odm_job_name": "test",
-      "odm_src_folder": "images/",
-      "odm_samplinge_time": "2025-08-17T09:04:40.311000",
-      "odm_image_count": 56,
-      "progress": 0,
-      "celery_task_id": "66ac0298-e3c0-4744-ae5c-62567f292ae0",
-      "update_at": "2025-08-17T17:00:41.479989",
-      "odm_task_id": "8671d618-6cd7-40ce-aba4-45e85eab19fb",
-      "run_id": "daccd58c51e94960",
-      "odm_job_type": "multispectral",
-      "odm_dest_folder": "E:\\python\\dcmg\\tmp\\1\\8671d618-6cd7-40ce-aba4-45e85eab19fb",
-      "odm_host": "http://192.168.3.194:7000/",
-      "odm_create_at": "2025-08-17T09:04:40.311000",
-      "state": "PENDING",
-      "err_msg": null
-    }]
-    ```
     """
     query = db.query(models.OdmJobs)
     data: list[models.OdmJobs] = query.options(
@@ -148,29 +125,6 @@ async def create_odm_job(data: utils.OdmJob, db: Session = Depends(get_database)
     - **odm_job_name**: Human-readable job name
     - **odm_src_folder**: Data storage path
     - ...other fields...
-
-    ### Example
-    ```json
-    {
-      "id": 1,
-      "odm_project_id": 1,
-      "odm_job_name": "test",
-      "odm_src_folder": "images/",
-      "odm_samplinge_time": "2025-08-17T09:04:40.311000",
-      "odm_image_count": 56,
-      "progress": 0,
-      "celery_task_id": "66ac0298-e3c0-4744-ae5c-62567f292ae0",
-      "update_at": "2025-08-17T17:00:41.479989",
-      "odm_task_id": "8671d618-6cd7-40ce-aba4-45e85eab19fb",
-      "run_id": "daccd58c51e94960",
-      "odm_job_type": "multispectral",
-      "odm_dest_folder": "E:\\python\\dcmg\\tmp\\1\\8671d618-6cd7-40ce-aba4-45e85eab19fb",
-      "odm_host": "http://192.168.3.194:7000/",
-      "odm_create_at": "2025-08-17T09:04:40.311000",
-      "state": "PENDING",
-      "err_msg": null
-    }
-    ```
 
     ### Raises
     HTTPException
@@ -248,50 +202,6 @@ async def create_odm_job(data: utils.OdmJob, db: Session = Depends(get_database)
         db.refresh(new_rsdm_job)
 
         return new_rsdm_job
-
-
-@router.get('/get_odm_state')
-async def get_odm_state(project_id: int, task_id: str, db: Session = Depends(get_database)) -> utils.OdmState:
-    """
-    ## Get the current state of an ODM task.
-
-    This endpoint retrieves the current state of an ODM task.
-
-    ### Parameters
-    - **project_id**: The project ID of the ODM task
-    - **task_id**: The task ID of the ODM task
-
-    ### Response:
-    Returns `OdmState` with fields:
-    - **state**: The current state of the ODM task
-    - **progress**: The progress of the ODM task (0-100)
-    - **host**: The base URL of the ODM server
-    - **error**: The error message if the job failed, otherwise null
-
-    ### Example
-    ```json
-    {
-      "state": "COMPLETED",
-      "progress": 100,
-      "host": "http://127.0.0.1:8000",
-      "error": null
-    }
-    ```
-    """
-    job: models.OdmJobs = db.query(models.OdmJobs).filter(
-        models.OdmJobs.odm_project_id == project_id,
-        models.OdmJobs.odm_task_id == task_id
-    ).first()
-
-    if not job:
-        raise HTTPException(status_code=404, detail=_("Odm task not found"))
-
-    # Get the current state of the Celery task
-    celery_state = get_current_state(job.celery_task_id)
-    if not celery_state:
-        celery_state = utils.OdmState(state=job.state, progress=job.progress, host=job.odm_host, error=job.err_msg)
-
-    return celery_state
 
 
 @router.get('/cancel_odm_job')
@@ -394,6 +304,13 @@ async def remove_odm_job(project_id: int, task_id: str, db: Session = Depends(ge
             detail=_("ODM task must be completed, failed, or canceled before it can be removed.")
         )
 
+    if job.odm_dest_folder:
+        import shutil
+        dest_path = Path(job.odm_dest_folder)
+        if dest_path.exists() and dest_path.is_dir():
+            shutil.rmtree(dest_path)
+            logger.info("Removed all files in directory: %s", dest_path)
+
     db.delete(job)
     db.commit()
 
@@ -459,7 +376,7 @@ async def generate_report(
         output_dir=str(output_dir),
         reflector_dest_dir=str(reflector_dest_dir),
         orthophoto_tif=str(orthophoto_tif),
-        log_file=str(log_file)
+        runtime_log_file=str(log_file)
     )
 
     # Query the database for the specified task
@@ -487,9 +404,6 @@ async def generate_report(
 
     db.add(task)
     db.commit()
-    db.refresh(task)
-
-    return task
 
 
 @router.put('/save_report/{project_id}/{task_id}', status_code=status.HTTP_204_NO_CONTENT)
@@ -597,23 +511,23 @@ def get_report_detail(
     query = query.join(models.OdmJobs, models.OdmJobs.id == models.OdmReport.job_id)
     query = query.filter(models.OdmJobs.odm_project_id == project_id)
     query = query.filter(models.OdmJobs.odm_task_id == task_id)
-    orp: models.OdmReport = query.first()
+    odm_report_record: models.OdmReport = query.first()
 
-    if not orp:
+    if not odm_report_record:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=_("Report not found, please try again later."))
 
     # Get the current state of the Celery task
-    if orp.celery_task_id:
-        report_state = get_report_current_state(orp.celery_task_id)
+    if odm_report_record.celery_task_id:
+        report_state = get_report_current_state(odm_report_record.celery_task_id)
         if report_state:
-            orp.state = report_state.state
-            orp.progress = report_state.progress
+            odm_report_record.state = report_state.state
+            odm_report_record.progress = report_state.progress
 
-    orp.output_dir = str(Path(orp.output_dir).relative_to(Path(os.getcwd())))
-    orp.resource_files = utils.get_odm_resource_files(orp.output_dir) if orp.job.odm_job_type == utils.OdmType.multispectral.value else None
-    orp.oss_url = os.getenv("OSS_DOMAIN").rstrip("/") + "/" + utils.format_oss_upload_prefix(project_id, task_id)
+    odm_report_record.output_dir = str(Path(odm_report_record.output_dir))
+    odm_report_record.resource_files = utils.get_odm_resource_files(odm_report_record.output_dir) if odm_report_record.job.odm_job_type == utils.OdmType.multispectral.value else None
+    odm_report_record.oss_url = os.getenv("OSS_DOMAIN").rstrip("/") + "/" + utils.format_oss_upload_prefix(project_id, task_id)
 
-    return orp
+    return odm_report_record
 
 
 @router.get('/get_reports')
@@ -707,8 +621,10 @@ def upload_report(
     4. Commit report information to online system with metadata
     5. Update database with final status
     """
-    logger.info("Start uploading report for project_id: %s, task_id: %s, cid: %s, token: %s",
-                data.project_id, data.task_id, cid, token)
+    setting_headers = utils.get_basic_headers()
+
+    logger.info("Start uploading report for project_id: %s, task_id: %s, headers: %s",
+                data.project_id, data.task_id, setting_headers)
     # Query the database for the specified report using project_id, task_id
     query = db.query(models.OdmReport).join(models.OdmJobs, models.OdmReport.job_id == models.OdmJobs.id)
     query = query.filter(models.OdmJobs.odm_project_id == data.project_id)
@@ -734,8 +650,7 @@ def upload_report(
         odm_radiometric=odm_radiometric,
         output_dir=orp.output_dir,
         report_no=data.report_no,
-        token=token,
-        cid=cid
+        setting_headers=setting_headers
     )
 
     # Log the creation of the Celery task

@@ -29,7 +29,7 @@ import pandas as pd
 
 # Define Excel column headers
 COLUMNS = [
-    '样方名称', '坐标点1', '坐标点2', '坐标点3', '坐标点4', '坐标中心点',
+    '样方名称', '坐标点', '坐标中心点',
     'NDVI最大值', 'NDVI最小值', 'NDVI平均值', 'NDVI标准差',
     'GNDVI最大值', 'GNDVI最小值', 'GNDVI平均值', 'GNDVI标准差',
     'NDRE最大值', 'NDRE最小值', 'NDRE平均值', 'NDRE标准差',
@@ -41,24 +41,29 @@ COLUMNS = [
 
 # Define the starting column index for each algorithm in Excel
 COLUMN_CONFIG = {
-    'ndvi': 7,
-    'gndvi': 11,
-    'ndre': 15,
-    'r': 19,
-    'g': 23,
-    're': 27,
-    'n': 31
+    'ndvi': 4,
+    'gndvi': 8,
+    'ndre': 12,
+    'r': 16,
+    'g': 20,
+    're': 24,
+    'n': 28
 }
 TEMPLATE_XLSX_PATH = Path(os.getcwd()) / "docker/rsdm/template.xlsx"
 
 
-def format_coord(coord) -> str:
+def format_coord(coords) -> str:
     """
     Format coordinate point as string with 6 decimal places
     """
-    if isinstance(coord, list) and len(coord) == 2:
-        return "{:.6f}, {:.6f}".format(coord[0], coord[1])
-    return str(coord)
+    def process(coord):
+        if isinstance(coord, list) and len(coord) == 2:
+            return "{:.6f}, {:.6f}".format(coord[0], coord[1])
+        return str(coord)
+
+    coord_format = [process(c) for c in coords]
+
+    return '\n'.join(coord_format)
 
 
 def create_template():
@@ -85,15 +90,10 @@ def generate_excel(quadrat_records) -> io.BytesIO:
 
     # Process each quadrat record
     for row_idx, quadrat in enumerate(quadrat_records, 2):
-        coords = quadrat.coords
-
         # Write basic quadrat information
         ws.cell(row=row_idx, column=1, value=quadrat.name if quadrat.name else '样方{}'.format(row_idx - 1))
-        ws.cell(row=row_idx, column=2, value=format_coord(coords[0]))
-        ws.cell(row=row_idx, column=3, value=format_coord(coords[1]))
-        ws.cell(row=row_idx, column=4, value=format_coord(coords[2]))
-        ws.cell(row=row_idx, column=5, value=format_coord(coords[3]))
-        ws.cell(row=row_idx, column=6, value=format_coord(quadrat.center))
+        ws.cell(row=row_idx, column=2, value=format_coord(quadrat.coords))
+        ws.cell(row=row_idx, column=3, value=format_coord(quadrat.center))
 
         # Build statistics dictionary
         stats_dict = {stat.algo_name.lower(): stat for stat in quadrat.statistics}

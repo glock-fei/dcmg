@@ -1,5 +1,5 @@
 x-common-gpu: &common-gpu
-  #runtime: nvidia
+#  runtime: nvidia
   deploy:
     resources:
       reservations:
@@ -9,19 +9,28 @@ x-common-gpu: &common-gpu
             capabilities: [gpu]
 
 x-common-env-vars: &common-env-vars
-  - HOST_DIR=${PWD}
-  - CELERY_BROKER_URL=redis://redis:6379/0
-  - CELERY_RESULT_BACKEND=redis://redis:6379/1
-  - REDIS_HOST=redis
-  - REDIS_PORT=6379
-  - DOCKER_HOST=tcp://172.17.0.1:2375
-  - DOCKER_TLS_VERIFY=
-  - DOCKER_CERT_PATH=
+  HOST_DIR: ${PWD}
+  MOUNT_USB_DIR: ${MOUNT_USB_DIR}
+  MOUNT_ODM_DIR: ${MOUNT_ODM_DIR}
+  ODM_MEDIA_DIR: ${MOUNT_ODM_DIR}/#project_id#/task/#task_id#
+  ODM_DATA_DIR: ${ODM_DATA_DIR}
+  ODM_HOST: http://host.docker.internal:8000
+  CELERY_BROKER_URL: redis://redis:6379/0
+  CELERY_RESULT_BACKEND: redis://redis:6379/1
+  REDIS_HOST: redis
+  REDIS_PORT: 6379
+  DOCKER_HOST: tcp://host.docker.internal:2375
+  DOCKER_TLS_VERIFY: ""
+  DOCKER_CERT_PATH: ""
 
 x-app-base: &app-base
   build: .
+  extra_hosts:
+    - "host.docker.internal:host-gateway"
   volumes:
     - .:/app
+    - ${USB_DATA_DIR}:${MOUNT_USB_DIR}
+    - ${ODM_DATA_DIR}:${MOUNT_ODM_DIR}
   <<: *common-gpu
   depends_on:
     - redis
@@ -63,6 +72,7 @@ services:
     container_name: worker-default
     command: celery -A worker.app worker -Q default -l info -n default@%h -c 1
     environment: *common-env-vars
+
 
   # Celery worker for ODM report generation
   worker-generate-odm:

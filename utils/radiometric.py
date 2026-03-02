@@ -17,6 +17,7 @@ class QuadratBase(BaseModel):
     """
     Model for quadrats.
     """
+    idx: Optional[str] = Field(None, description="Index of the quadrat")
     name: Optional[str] = Field(None, description="Name of the quadrat")
     coords: list[tuple[float, float]] = Field(..., description="Coordinates of the quadrat")
     center: tuple[float, float] = Field(..., description="Center of the quadrat")
@@ -78,7 +79,7 @@ def get_dn_values_in_polygon(
 
     # Flatten the image array to 1D and create a mask for valid values
     flattened = masked_image.flatten()
-    valid_mask = ~np.isnan(flattened) & np.isfinite(flattened) & (flattened > 0)
+    valid_mask = ~np.isnan(flattened) & np.isfinite(flattened)  # & (flattened > 0)
 
     # Exclude nodata values if present
     if src.nodata is not None:
