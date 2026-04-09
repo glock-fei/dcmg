@@ -187,3 +187,4 @@ cython_debug/
 /tmp
 /.lingma
 /media
+/docker/rsdm/reflector
