@@ -41,13 +41,13 @@ COLUMNS = [
 
 # Define the starting column index for each algorithm in Excel
 COLUMN_CONFIG = {
-    'ndvi': 4,
-    'gndvi': 8,
-    'ndre': 12,
-    'r': 16,
-    'g': 20,
-    're': 24,
-    'n': 28
+    'ndvi': 5,
+    'gndvi': 9,
+    'ndre': 13,
+    'r': 17,
+    'g': 21,
+    're': 25,
+    'n': 29
 }
 TEMPLATE_XLSX_PATH = Path(os.getcwd()) / "docker/rsdm/template.xlsx"
 
@@ -91,9 +91,11 @@ def generate_excel(quadrat_records) -> io.BytesIO:
     # Process each quadrat record
     for row_idx, quadrat in enumerate(quadrat_records, 2):
         # Write basic quadrat information
-        ws.cell(row=row_idx, column=1, value=quadrat.name if quadrat.name else '样方{}'.format(row_idx - 1))
-        ws.cell(row=row_idx, column=2, value=format_coord(quadrat.coords))
-        ws.cell(row=row_idx, column=3, value=format_coord(quadrat.center))
+        ws.cell(row=row_idx, column=1, value=quadrat.sort_no if quadrat.sort_no else '样方{}'.format(row_idx - 1))
+        # ws.cell(row=row_idx, column=1, value=quadrat.sort_no)
+        ws.cell(row=row_idx, column=2, value=quadrat.name)
+        ws.cell(row=row_idx, column=3, value=format_coord(quadrat.coords))
+        ws.cell(row=row_idx, column=4, value=format_coord(quadrat.center))
 
         # Build statistics dictionary
         stats_dict = {stat.algo_name.lower(): stat for stat in quadrat.statistics}

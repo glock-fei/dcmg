@@ -4,15 +4,27 @@ import os
 from enum import Enum
 from datetime import datetime
 from pathlib import Path
-from typing import Optional, Callable
+from typing import Optional, Callable, Literal
 from urllib.parse import urljoin
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 import requests
+
+import math
+import exifread
+from exifread.utils import get_gps_coords
+from pyproj import Geod
+
 from utils.translation import gettext_lazy as _
 from .radiometric import Radiometric
 
 logger = logging.getLogger(__name__)
+
+EXIF_TIME_FIELDS = [
+    'EXIF DateTimeOriginal',
+    'EXIF DateTimeDigitized',
+    'Image DateTime',
+]
 
 
 class ProgressKeys(Enum):
@@ -26,7 +38,9 @@ class OdmType(Enum):
     Enumeration of supported ODM image types.
     """
     multispectral = "multispectral"
+    thermal_infrared = "thermal-infrared"
     rgb = "rgb"
+    all = "all"
 
 
 class OdmJobStatus(Enum):
@@ -91,6 +105,14 @@ class OdmGenRep(BaseModel):
     orthophoto_tif: str = "odm_orthophoto/odm_orthophoto.tif"
 
 
+class SamplePlot(BaseModel):
+    src_folder: str = Field(...,
+                            description="The file path to the source aerial imagery (GeoTIFF or JPEG) containing GPS metadata.")
+    geometry_type: Literal['square', 'circle'] = Field('square',
+                                                       description="The shape of the sample plot (square or circle).")
+    dimension_cm: int = Field(100, description="The size of the sample plot in centimeters.")
+
+
 class OdmJob(BaseModel):
     """
     Data model representing an ODM job configuration and metadata.
@@ -107,6 +129,7 @@ class OdmJob(BaseModel):
     odm_host: Optional[str] = None
     odm_create_at: datetime
     radiometric: Optional[list[list[Radiometric]]] = None
+    sample_plot: Optional[SamplePlot] = None
 
     def to_dict(self):
         """
@@ -125,6 +148,48 @@ class OdmJob(BaseModel):
             "odm_host": self.odm_host,
             "odm_create_at": self.odm_create_at
         }
+
+
+def get_file_time(file):
+    """
+    if no exif time, get create time
+    """
+    file_time = None
+    with open(file, 'rb') as f:
+        tags = exifread.process_file(f, stop_tag='DateTime', details=False)
+
+        for field in EXIF_TIME_FIELDS:
+            # get exif time
+            file_time = tags.get(field)
+            if file_time is not None:
+                break
+
+    # if no exif time, get create time
+    if file_time is None:
+        return datetime.fromtimestamp(Path(file).stat().st_ctime)
+
+    return datetime.strptime(str(file_time).strip(), "%Y:%m:%d %H:%M:%S")
+
+
+def sort_files_by_time(file_list):
+    """
+    Sort files by time
+    """
+    sorts_time = []
+
+    # get time
+    for file in file_list:
+        file_time = get_file_time(file)
+        sorts_time.append((Path(file).stem, file_time))
+
+    # sort by time and filename
+    sorts_time.sort(key=lambda x: (x[0], x[1]))
+
+    sort_dict = {}
+    for idx, (filename, file_time) in enumerate(sorts_time, start=1):
+        sort_dict[filename] = (idx, file_time)
+
+    return sort_dict
 
 
 def find_images(src_folder: str, fot: OdmType):
@@ -153,7 +218,11 @@ def find_images(src_folder: str, fot: OdmType):
         ],
         'multispectral': [
             '.tif', '.tiff', '.hdr', '.raw', '.cr2', '.nef', '.arw', '.dng', '.orf'
-        ]
+        ],
+        'thermal-infrared': [
+            '.tif', '.tiff', '.hdr', '.raw', '.cr2', '.nef', '.arw', '.dng', '.orf'
+        ],
+        'all': '*'
     }
     targer_folder = Path(src_folder)
 
@@ -161,7 +230,8 @@ def find_images(src_folder: str, fot: OdmType):
     for path in targer_folder.rglob('*'):
         if path.is_file():
             ext = path.suffix.lower()
-            if ext in extensions.get(fot.value, []):
+            allow_ext = extensions.get(fot.value, [])
+            if allow_ext == "*" or ext in allow_ext:
                 result.append(str(path.resolve()))
 
     return result
@@ -320,7 +390,7 @@ def get_dest_folder(project_id: int, task_id: str) -> str:
     return str(dest_folder.resolve())
 
 
-def prepare_odm_output_structure(project_id: int, task_id: str, skip_creation: bool = True) -> (Path, Path, Path):
+def prepare_odm_output_structure(project_id: int, task_id: str, skip_creation: bool = True) -> list[Path]:
     """
     Prepare the output folder structure for an ODM task.
 
@@ -336,22 +406,25 @@ def prepare_odm_output_structure(project_id: int, task_id: str, skip_creation: b
         Path: The absolute path to the output folder
         Path: The absolute path to the log file
         Path: The absolute path to the reflector folder
+        Path: The absolute path to the sample plot folder
 
     """
     output_dir = Path(os.getenv("STATIC_DIR", "static")) / "odm" / str(project_id) / task_id
     log_file = output_dir / "app.log"
     reflector_dest_dir = output_dir / "reflector"
+    sample_plot_dest_dir = output_dir / "sample_plot"
 
     # Create new output directory structure and log file
     if not skip_creation:
         reflector_dest_dir.mkdir(parents=True, exist_ok=True)
+        sample_plot_dest_dir.mkdir(parents=True, exist_ok=True)
         # remove existing log file if exists
         if log_file.exists():
             log_file.unlink()
         log_file.touch()
     logger.info("save log to file: %s", log_file.resolve())
 
-    return output_dir, log_file, reflector_dest_dir
+    return [output_dir, log_file, reflector_dest_dir, sample_plot_dest_dir]
 
 
 def get_content_length(url: str) -> int:
@@ -592,3 +665,44 @@ def get_basic_headers():
             headers = rsg.get("extra", {}).get("header", {})
     finally:
         return headers
+
+
+def read_gps_from_photo(photo_path):
+    """
+    """
+    try:
+
+        with open(photo_path, 'rb') as f:
+            tags = exifread.process_file(f, details=False)
+            lat, lng = get_gps_coords(tags)
+
+            return lng, lat
+    except (FileExistsError, Exception):
+        return None
+
+
+def generate_shape_coords(center_lat, center_lon, size_m, shape_type='square', num_points=72):
+    """
+    """
+    g = Geod(ellps='WGS84')
+    coords = []
+
+    if shape_type == 'square':
+        half_side = size_m / 2.0
+        dist_to_corner = math.sqrt(2 * (half_side ** 2))
+        azimuths = [45, 135, -135, -45]
+
+        for az in azimuths:
+            # fwd(lon, lat, azimuth, distance) -> lon, lat, back_az
+            tgt_lon, tgt_lat, _ = g.fwd(center_lon, center_lat, az, dist_to_corner)
+            coords.append((tgt_lon, tgt_lat))
+
+    elif shape_type == 'circle':
+        radius = size_m / 2.0
+        angles = [360 * i / num_points for i in range(num_points)]
+
+        for az in angles:
+            tgt_lon, tgt_lat, _ = g.fwd(center_lon, center_lat, az, radius)
+            coords.append((tgt_lon, tgt_lat))
+
+    return coords

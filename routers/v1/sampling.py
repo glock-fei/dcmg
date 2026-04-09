@@ -2,6 +2,7 @@ import logging
 from pathlib import Path
 from typing import Optional
 
+import rasterio
 from fastapi import APIRouter, Depends, status
 from fastapi.exceptions import HTTPException
 from fastapi.responses import StreamingResponse
@@ -120,6 +121,7 @@ async def get_sampling_record_with_statistics(sampling_id: int, latest_only: boo
     if latest_only:
         quadrat_query = quadrat_query.filter(models.OdmQuadrat.run_id == sampling_record.latest_run_id)
 
+    quadrat_query = quadrat_query.order_by(models.OdmQuadrat.sort_no.asc())
     quadrat_records = quadrat_query.all()
     sampling_record.quadrats = quadrat_records
 
@@ -210,6 +212,8 @@ async def initiate_sampling_statistics(
     """
     sampling_record = _get_sampling_record(db, sampling_id)
     resource_files = utils.get_odm_resource_files(sampling_record.report.output_dir)
+    latest_run_id = utils.generate_run_id()
+    quadrats = []
 
     if len(resource_files) == 0:
         raise HTTPException(
@@ -221,18 +225,31 @@ async def initiate_sampling_statistics(
             )
         )
 
-    latest_run_id = utils.generate_run_id()
+    # Check bounds of the raster image
+    resource_dir = Path(sampling_record.report.output_dir)
+    tif_file = resource_dir / list(resource_files.values())[0].get("tif")
+    with rasterio.open(tif_file) as src:
+        bounds = src.bounds
 
-    quadrats = []
     # Create quadrats associated with the sampling record
     for quadrat in data:
+        for coord in quadrat.coords:
+            if not utils.is_coord_in_raster_bounds(coord, bounds):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=_(
+                        'One or more coordinates are outside the bounds of the raster image.'
+                    )
+                )
+
         quad = models.OdmQuadrat(
             sampling_id=sampling_record.id,
             run_id=latest_run_id,
             name=quadrat.name,
             idx=quadrat.idx,
             coords=quadrat.coords,
-            center=quadrat.center
+            center=quadrat.center,
+            sort_no=quadrat.sort_no
         )
         db.add(quad)
         db.flush()
@@ -307,6 +324,8 @@ async def export_sampling_record_to_excel(sampling_id: int, filename: Optional[s
     quadrat_query = quadrat_query.filter(models.OdmQuadrat.sampling_id == sampling_id)
     quadrat_query = quadrat_query.filter(models.OdmQuadrat.run_id == sampling_record.latest_run_id)
     quadrat_query = quadrat_query.filter(models.OdmQuadrat.is_deleted == 0)
+
+    quadrat_query = quadrat_query.order_by(models.OdmQuadrat.sort_no)
     quadrat_records = quadrat_query.all()
 
     from utils.sampling_data_exporter import generate_excel

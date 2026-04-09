@@ -5,6 +5,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Annotated
 
+import rasterio
 from fastapi import APIRouter, Depends, status, Header
 from fastapi.exceptions import HTTPException
 from sqlalchemy import desc
@@ -17,7 +18,7 @@ import utils
 from worker.tasks import (
     copy_image_to_odm, abort_task, get_current_state,
     generate_odm_report, upload_odm_report_to_cloud,
-    get_report_current_state
+    get_report_current_state,sampling_statistics
 )
 from utils.translation import gettext_lazy as _
 
@@ -32,6 +33,7 @@ async def get_surface_reflectance(data: utils.Radiometric):
 
     The endpoint returns the surface reflectance of a given image and panel coordinates.
     """
+    logger.info("Getting surface reflectance for %s", data.dict())
     picture = utils.get_src_folder(data.picture)
 
     return utils.get_surface_reflectance(picture, data.coords, data.panel_reflectance)
@@ -165,13 +167,14 @@ async def create_odm_job(data: utils.OdmJob, db: Session = Depends(get_database)
                      run_id, len(images), data.odm_src_folder, odm_dest_folder)
 
         # initiate background task to copy images to the ODM server
-        output_dir, log_file, reflector_dest_dir = utils.prepare_odm_output_structure(
+        pre_dest = utils.prepare_odm_output_structure(
             project_id=data.odm_project_id,
             task_id=data.odm_task_id,
             skip_creation=False
         )
         radiometric = [[rad.dict() for rad in row] for row in data.radiometric] if data.radiometric else None
-        logging.info("Radiometric data: %s", radiometric)
+        sample_plot = data.sample_plot.dict() if data.sample_plot else None
+        logging.info("Radiometric data: %s, Sample plot: %s", radiometric, sample_plot)
 
         # Create a new Celery task to copy images to the ODM server
         task = copy_image_to_odm.delay(
@@ -180,7 +183,9 @@ async def create_odm_job(data: utils.OdmJob, db: Session = Depends(get_database)
             base_url=data.odm_host,
             odm_dest_folder=odm_dest_folder,
             images=images,
-            reflector_dest_dir=str(reflector_dest_dir),
+            reflector_dest_dir=str(pre_dest[2]),
+            sample_plot_dest_dir=str(pre_dest[3]),
+            sample_plot=sample_plot,
             radiometric=radiometric
         )
         logging.info("Created Celery task %s, status %s", task.id, task.status)
@@ -363,7 +368,7 @@ async def generate_report(
     if not job:
         raise HTTPException(status_code=404, detail=_("Job not found"))
 
-    output_dir, log_file, reflector_dest_dir = utils.prepare_odm_output_structure(
+    pre_dest = utils.prepare_odm_output_structure(
         project_id=data.project_id,
         task_id=data.task_id
     )
@@ -373,10 +378,11 @@ async def generate_report(
         project_id=data.project_id,
         task_id=data.task_id,
         odm_job_name=data.odm_job_name if data.odm_job_name else job.odm_job_name,
-        output_dir=str(output_dir),
-        reflector_dest_dir=str(reflector_dest_dir),
+        output_dir=str(pre_dest[0]),
+        reflector_dest_dir=str(pre_dest[2]),
         orthophoto_tif=str(orthophoto_tif),
-        runtime_log_file=str(log_file)
+        runtime_log_file=str(pre_dest[1]),
+        remote_type=job.odm_job_type,
     )
 
     # Query the database for the specified task
@@ -439,8 +445,10 @@ async def save_report(
     if not job:
         raise HTTPException(status_code=404, detail=_("Job not found"))
 
-    report_saved_folder, log_file, reflector_dest_dir = utils.prepare_odm_output_structure(project_id, task_id)
-    report_json = utils.get_odm_report_json(report_saved_folder)
+    pre_dest = utils.prepare_odm_output_structure(project_id, task_id)
+    output_dir = pre_dest[0]
+
+    report_json = utils.get_odm_report_json(output_dir)
     # Check if the report exists
     if not report_json.exists():
         raise HTTPException(status_code=404, detail=_("The report has not been generated yet"))
@@ -454,16 +462,15 @@ async def save_report(
                 status_code=404,
                 detail=_("An error occurred during report generation, and it cannot be saved")
             )
-
     # Use upsert method to either update existing report or create new one
-    models.OdmReport.upsert(
+    odm_report: models.OdmReport = models.OdmReport.upsert(
         db,
         job_id=job.id,
-        output_dir=str(report_saved_folder),
-        log_file=str(log_file),
+        output_dir=str(output_dir),
+        log_file=str(pre_dest[1]),
         orthophoto_tif=report[0].get("file_name"),
         area_mu=report[0].get("area_mu"),
-        band=report[0].get("band") if job.odm_job_type == utils.OdmType.multispectral.value else None,
+        band=report[0].get("band"),
         state=utils.OdmJobStatus.pending.value,
         progress=0,
         celery_task_id=None,
@@ -482,6 +489,73 @@ async def save_report(
             output_files=veg.get("output"),
             class_count=veg.get("report")
         )
+
+    if job.sample_plot:
+        sample_plot = utils.SamplePlot(**job.sample_plot)
+        quadrats = []
+
+        if Path(sample_plot.src_folder).exists():
+            logger.info("Start processing the sampled images")
+            sampling_record = models.OdmSamplingRecord.upsert(db, job_id=job.id, report_id=odm_report.id)
+            resource_files = utils.get_odm_resource_files(output_dir)
+            tif_file = output_dir / list(resource_files.values())[0].get("tif")
+            with rasterio.open(tif_file) as src:
+                bounds = src.bounds
+
+            images = utils.find_images(sample_plot.src_folder, utils.OdmType.all)
+            # sort images by time
+            sorted_imgs = utils.sort_files_by_time(images)
+
+            # generate run id for sampling statistics
+            latest_run_id = utils.generate_run_id()
+            for idx, img in enumerate(images, start=1):
+                center_pos = utils.read_gps_from_photo(img)
+                if not center_pos:
+                    logger.warning("The image %s does not have GPS information", img)
+                    continue
+
+                c_lon, c_lat = center_pos
+                square_pts = utils.generate_shape_coords(
+                    center_lat=c_lat,
+                    center_lon=c_lon,
+                    size_m=sample_plot.dimension_cm / 100,
+                    shape_type=sample_plot.geometry_type
+                )
+
+                is_coord_in_raster_bounds = True
+                for coord in square_pts:
+                    is_coord_in_raster_bounds = utils.is_coord_in_raster_bounds(coord, bounds)
+                    if not is_coord_in_raster_bounds:
+                        logger.warning("The image %s is not in the raster bounds", img)
+                        break
+
+                if not is_coord_in_raster_bounds:
+                    continue
+
+                file_name = Path(img).stem
+                quad = models.OdmQuadrat(
+                    sampling_id=sampling_record.id,
+                    run_id=latest_run_id,
+                    name=file_name,
+                    idx=idx,
+                    coords=square_pts,
+                    center=center_pos,
+                    sort_no=sorted_imgs.get(file_name)[0]
+                )
+                db.add(quad)
+                db.flush()
+
+                quadrats.append([quad.id, square_pts])
+
+            if len(quadrats) > 0:
+                task = sampling_statistics.delay(
+                    output_dir=sampling_record.report.output_dir,
+                    resource_files=resource_files,
+                    quadrats=quadrats
+                )
+                sampling_record.celery_task_id = task.id
+                sampling_record.latest_run_id = latest_run_id
+                sampling_record.cloud_id = None
 
     db.commit()
 
@@ -507,14 +581,16 @@ def get_report_detail(
     ### Response:
         Returns `OdmReport`
     """
-    query = db.query(models.OdmReport).options(selectinload(models.OdmReport.job).selectinload(models.OdmJobs.vegetation))
+    query = db.query(models.OdmReport).options(
+        selectinload(models.OdmReport.job).selectinload(models.OdmJobs.vegetation))
     query = query.join(models.OdmJobs, models.OdmJobs.id == models.OdmReport.job_id)
     query = query.filter(models.OdmJobs.odm_project_id == project_id)
     query = query.filter(models.OdmJobs.odm_task_id == task_id)
     odm_report_record: models.OdmReport = query.first()
 
     if not odm_report_record:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=_("Report not found, please try again later."))
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
+                            detail=_("Report not found, please try again later."))
 
     # Get the current state of the Celery task
     if odm_report_record.celery_task_id:
@@ -524,8 +600,16 @@ def get_report_detail(
             odm_report_record.progress = report_state.progress
 
     odm_report_record.output_dir = str(Path(odm_report_record.output_dir))
-    odm_report_record.resource_files = utils.get_odm_resource_files(odm_report_record.output_dir) if odm_report_record.job.odm_job_type == utils.OdmType.multispectral.value else None
-    odm_report_record.oss_url = os.getenv("OSS_DOMAIN").rstrip("/") + "/" + utils.format_oss_upload_prefix(project_id, task_id)
+
+    odm_report_record.resource_files = None
+    if odm_report_record.job.odm_job_type not in [utils.OdmType.rgb.value]:
+        odm_report_record.resource_files = utils.get_odm_resource_files(odm_report_record.output_dir)
+
+    # odm_report_record.resource_files = utils.get_odm_resource_files(
+    #     odm_report_record.output_dir) if odm_report_record.job.odm_job_type == utils.OdmType.multispectral.value else None
+
+    base_url = os.getenv("OSS_DOMAIN", "").rstrip("/")
+    odm_report_record.oss_url = base_url + "/" + utils.format_oss_upload_prefix(project_id, task_id)
 
     return odm_report_record
 

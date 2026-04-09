@@ -10,6 +10,7 @@ from .cersdm import (
     find_images,
     OdmType,
     OdmJob,
+    SamplePlot,
     StateBase,
     OdmJobStatus,
     OdmState,
@@ -30,7 +31,10 @@ from .cersdm import (
     format_oss_upload_prefix,
     clean_filename,
     get_odm_base_url,
-    get_basic_headers
+    get_basic_headers,
+    read_gps_from_photo,
+    generate_shape_coords,
+    sort_files_by_time
 )
 
 # VDCM utilities
@@ -49,7 +53,8 @@ from .radiometric import (
     Radiometric, 
     Sampling, 
     get_dn_values_in_polygon, 
-    QuadratBase
+    QuadratBase,
+    is_coord_in_raster_bounds
 )
 
 # DCM utilities
@@ -66,6 +71,7 @@ __all__ = [
     'find_images',
     'OdmType',
     'OdmJob',
+    'SamplePlot',
     'StateBase',
     'OdmJobStatus',
     'OdmState',
@@ -87,6 +93,9 @@ __all__ = [
     'clean_filename',
     'get_odm_base_url',
     'get_basic_headers',
+    'read_gps_from_photo',
+    'generate_shape_coords',
+    'sort_files_by_time',
     
     # VDCM utilities
     'VdcmCreate',
@@ -102,7 +111,8 @@ __all__ = [
     'Sampling',
     'get_dn_values_in_polygon',
     'QuadratBase',
-    
+    'is_coord_in_raster_bounds',
+
     # DCM utilities
     'generate_run_id',
     

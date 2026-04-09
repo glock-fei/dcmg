@@ -118,6 +118,8 @@ def copy_image_to_odm(
         odm_dest_folder: str,
         images: [],
         reflector_dest_dir: str,
+        sample_plot_dest_dir: str,
+        sample_plot: Optional[dict],
         radiometric: Optional[list[list[dict]]]
 ):
     """
@@ -126,23 +128,6 @@ def copy_image_to_odm(
     This function handles the transfer of images from their source location
     to the ODM server's media directory. It tracks progress and automatically
     triggers job commit upon completion.
-
-    Args:
-        self (AbortableTask): The Celery task instance
-        project_id (int): The ID of the project the images belong to
-        task_id (str): The task identifier for the ODM job
-        base_url (str): The base URL of the odm host
-        odm_dest_folder (str): The destination folder on the ODM server
-        images (list): List of image file paths to copy
-        reflector_dest_dir (str): The reflector directory on the ODM server
-        radiometric (Optional[list[list[dict]]]): List of radiometric data for each image
-
-    Process:
-        1. Resolves the target directory path
-        2. Creates directory structure if needed
-        3. Copies each image while tracking progress
-        4. Updates progress cache after each file
-        5. Automatically commits job when complete
     """
     total_files = len(images)
     celery_task_id = self.request.id
@@ -152,6 +137,7 @@ def copy_image_to_odm(
     try:
         # Process radiometric data if present
         _process_radiometric_data(celery_task_id, radiometric, Path(reflector_dest_dir))
+        _process_sample_plot_data(celery_task_id, sample_plot, Path(sample_plot_dest_dir))
         # copy each image to target directory
         for img in images:
             if self.is_aborted():
@@ -163,7 +149,7 @@ def copy_image_to_odm(
                 break
 
             # copy image to target directory
-            shutil.copy(img, odm_dest_folder)
+            shutil.copy2(img, odm_dest_folder)
             copied_step += 1
 
             percentage = (Decimal(copied_step) / Decimal(total_files)) * 100
@@ -343,7 +329,8 @@ def generate_odm_report(
         output_dir,
         reflector_dest_dir,
         orthophoto_tif,
-        runtime_log_file: str
+        runtime_log_file: str,
+        remote_type: str = "multispectral"
 ):
     """
     Generate an ODM report using a Docker container.
@@ -361,6 +348,7 @@ def generate_odm_report(
         reflector_dest_dir (str): Destination directory for reflector images
         orthophoto_tif (str): Path to orthophoto TIF file
         runtime_log_file (str): Path to log file
+        remote_type(str):
 
     Process:
         1. Sets up directory structure for input/output files
@@ -412,13 +400,14 @@ def generate_odm_report(
         client = docker.from_env()
         # Run the RSDM Docker container to generate the report
         if os.getenv("MOUNT_ODM_DIR") or os.getenv("ODM_DATA_DIR"):
-            orthophoto_tif = Path(os.getenv("ODM_DATA_DIR")) / Path(orthophoto_tif).relative_to(os.getenv("MOUNT_ODM_DIR"))
+            orthophoto_tif = Path(os.getenv("ODM_DATA_DIR")) / Path(orthophoto_tif).relative_to(
+                os.getenv("MOUNT_ODM_DIR"))
 
         container = client.containers.run(
             detach=True,
             remove=False,
             image=os.getenv("RSDM_IMAGE"),
-            command=["./start"],
+            command=["./start", "--remote-type", remote_type],
             user=urid,
             environment=envs,
             extra_hosts={os.getenv("SERVICE_HOST_GATEWAY"): "host-gateway"},
@@ -447,7 +436,8 @@ def generate_odm_report(
         # Wait for container to finish and check exit code
         run_status = container.wait()
         if run_status.get("StatusCode") != 0:
-            raise Exception("odm.generate_report_task.error.docker_error: Docker container exited with non-zero exit code.")
+            raise Exception(
+                "odm.generate_report_task.error.docker_error: Docker container exited with non-zero exit code.")
 
         logger.info("ODM report generation complete.")
         state_base.state = utils.OdmJobStatus.completed.value
@@ -530,6 +520,33 @@ def get_report_current_state(celery_task_id: str) -> Union[utils.OdmUploadState,
         return current_state
 
 
+def _process_sample_plot_data(
+        celery_task_id: str,
+        sample_plot: dict,
+        sample_plot_dest_dir: Path
+) -> None:
+    """
+    """
+    if not sample_plot:
+        return None
+
+    data = utils.SamplePlot(**sample_plot)
+    src_folder = utils.get_src_folder(data.src_folder)
+    if not Path(src_folder).exists():
+        return None
+
+    images = utils.find_images(src_folder, utils.OdmType.all)
+    for img in images:
+        shutil.copy2(img, sample_plot_dest_dir)
+
+    data.src_folder = str(sample_plot_dest_dir)
+    with with_db_session() as db:
+        db.query(OdmJobs).filter(OdmJobs.celery_task_id == celery_task_id).update({OdmJobs.sample_plot: data.dict()})
+        db.commit()
+
+    logger.info("Copyed sample plot to %s", sample_plot_dest_dir)
+
+
 def _process_radiometric_data(
         celery_task_id: str,
         radiometric: Optional[list[list[dict]]],
@@ -542,14 +559,6 @@ def _process_radiometric_data(
     1. Copying image files to the reflector directory
     2. Updating picture paths to relative paths
     3. Saving the updated data to a config.json file
-
-    Args:
-        celery_task_id: The Celery task ID
-        radiometric: List of radiometric data rows, each containing items with picture info
-        reflector_dest_dir: Destination directory for reflector images
-
-    Returns:
-        None
     """
     if not radiometric or all(not row for row in radiometric):
         return
@@ -597,9 +606,9 @@ def sampling_statistics(
         resource_dir = Path(output_dir)
         records = []
 
-        logger.info(
-            "Starting sampling statistics calculation. Output dir: %s, Number of algorithms: %d, Number of quadrats: %d",
-            output_dir, len(resource_files), len(quadrats))
+        logger.info("Starting sampling statistics calculation. Output dir: %s, "
+                    "Number of algorithms: %d, Number of quadrats: %d",
+                    output_dir, len(resource_files), len(quadrats))
 
         for algo_name, files in resource_files.items():
             tif_file = resource_dir / files.get("tif")
@@ -616,7 +625,10 @@ def sampling_statistics(
                     logger.debug("Processing quadrat ID: %d with %d coordinates", quadrat_id, len(coords))
 
                     # get dn values in polygon
-                    dn_values, sorted_coords = utils.get_dn_values_in_polygon(coords, src)
+                    dn_values, sorted_coords = utils.get_dn_values_in_polygon(coords, src, raise_on_empty=False)
+                    if dn_values.size == 0:
+                        continue
+
                     stat_record = models.OdmQuadratStatistics(
                         quadrat_id=quadrat_id,
                         algo_name=algo_name,

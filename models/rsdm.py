@@ -9,9 +9,10 @@ class OdmJobs(Base):
 
     # Add unique constraint for odm_project_id and odm_task_id combination
     __table_args__ = (
-        UniqueConstraint("odm_project_id", "odm_task_id", name="uq_project_task"),
-        Index('idx_project_task', 'odm_project_id', 'odm_task_id'),
-        Index("idx_celery_task_id", "celery_task_id")
+        # UniqueConstraint("odm_project_id", "odm_task_id", name="uq_project_task"),
+        # Index('idx_project_task', 'odm_project_id', 'odm_task_id'),
+        Index("idx_celery_task_id", "celery_task_id"),
+        Index('idx_project_task_unique', 'odm_project_id', 'odm_task_id', unique=True),
     )
 
     id = Column(Integer, primary_key=True)
@@ -31,6 +32,8 @@ class OdmJobs(Base):
     celery_task_id = Column(String(64), nullable=True)
     err_msg = Column(String(255), nullable=True)
     radiometric = Column(JSON, nullable=True)
+    sample_plot = Column(JSON, nullable=True)
+
     update_at = Column(DateTime, nullable=False, default=datetime.now())
 
     # Relationship to OdmReport
@@ -81,7 +84,7 @@ class OdmReport(Base):
     sampling = relationship("OdmSamplingRecord", back_populates="report")
 
     @classmethod
-    def upsert(cls, db, job_id, **kwargs):
+    def upsert(cls, db, job_id: object, **kwargs: object) -> object:
         """
         Create or update an OdmReport record based on job_id.
         
@@ -110,6 +113,9 @@ class OdmReport(Base):
 
         # Always update the timestamp
         report.update_at = datetime.now()
+
+        db.flush()
+        return report
 
 
 class OdmVegetation(Base):
@@ -220,11 +226,10 @@ class OdmSamplingRecord(Base):
             db.add(record)
 
         # Update fields
-        if title is not None:
-            record.title = title
-            
+        record.title = title if title else datetime.now().strftime("S%Y%m%d_%H%M%S")
         record.create_at = datetime.now()
-        
+
+        db.flush()
         return record
 
     @classmethod
@@ -250,7 +255,7 @@ class OdmSamplingRecord(Base):
         db.add(record)
         db.commit()
         db.refresh(record)
-        
+
         return record
 
 
@@ -270,6 +275,7 @@ class OdmQuadrat(Base):
 
     sampling = relationship("OdmSamplingRecord", back_populates="quadrats")
     statistics = relationship("OdmQuadratStatistics", back_populates="quadrat")
+    sort_no: Column = Column(Integer, nullable=True)
 
     @classmethod
     def create_quadrats(cls, db, sampling_id, quadrats_data):
@@ -294,7 +300,7 @@ class OdmQuadrat(Base):
             )
             db.add(quadrat)
             quadrats.append(quadrat)
-            
+
         return quadrats
 
     @classmethod
@@ -312,14 +318,14 @@ class OdmQuadrat(Base):
             List of OdmQuadrat instances
         """
         query = db.query(cls).filter(cls.sampling_id == sampling_id)
-        
+
         if latest_only:
             # Join with OdmSamplingRecord to filter by latest_run_id
             query = query.join(OdmSamplingRecord).filter(
                 OdmSamplingRecord.id == cls.sampling_id,
                 OdmSamplingRecord.latest_run_id == cls.run_id
             )
-            
+
         return query.all()
 
 
@@ -328,7 +334,7 @@ class OdmQuadratStatistics(Base):
     __table_args__ = (
         Index('idx_quadrat_algo', 'quadrat_id', 'algo_name', unique=True),
     )
-    
+
     id = Column(Integer, primary_key=True)
 
     quadrat_id = Column(Integer, ForeignKey("odm_quadrat.id"), nullable=False, index=True)
@@ -369,9 +375,9 @@ class OdmQuadratStatistics(Base):
         # Update all provided fields
         for key, value in kwargs.items():
             setattr(statistics, key, value)
-            
+
         return statistics
-    
+
     @classmethod
     def bulk_upsert(cls, db, statistics_objects):
         """
@@ -391,8 +397,8 @@ class OdmQuadratStatistics(Base):
         for stat_obj in statistics_objects:
             # Perform upsert for each record using the existing upsert method
             upserted = cls.upsert(
-                db, 
-                stat_obj.quadrat_id, 
+                db,
+                stat_obj.quadrat_id,
                 stat_obj.algo_name,
                 picture=stat_obj.picture,
                 dn_min=stat_obj.dn_min,
@@ -401,5 +407,5 @@ class OdmQuadratStatistics(Base):
                 dn_std=stat_obj.dn_std
             )
             upserted_records.append(upserted)
-            
+
         return upserted_records

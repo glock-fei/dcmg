@@ -292,7 +292,6 @@ async def remove_job_by_no(
         try:
             client = docker.from_env()
             container = client.containers.get(job.container_id)
-            print(container)
 
             container.remove(force=True)
             logger.info("Removed container: %s", container.id)

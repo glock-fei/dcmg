@@ -40,10 +40,10 @@ def upgrade() -> None:
     sa.Column('err_msg', sa.String(length=255), nullable=True),
     sa.Column('update_at', sa.DateTime(), nullable=False),
     sa.PrimaryKeyConstraint('id'),
-    sa.UniqueConstraint('odm_project_id', 'odm_task_id', name='uq_project_task')
+    # sa.UniqueConstraint('odm_project_id', 'odm_task_id', name='uq_project_task')
     )
     op.create_index('idx_celery_task_id', 'odm_jobs', ['celery_task_id'], unique=False)
-    op.create_index('idx_project_task', 'odm_jobs', ['odm_project_id', 'odm_task_id'], unique=False)
+    # op.create_index('idx_project_task', 'odm_jobs', ['odm_project_id', 'odm_task_id'], unique=False)
     op.create_index(op.f('ix_odm_jobs_run_id'), 'odm_jobs', ['run_id'], unique=True)
     op.create_table('odm_reports',
     sa.Column('id', sa.Integer(), nullable=False),
@@ -81,7 +81,7 @@ def downgrade() -> None:
     op.drop_index('idx_r_celery_task_id', table_name='odm_reports')
     op.drop_table('odm_reports')
     op.drop_index(op.f('ix_odm_jobs_run_id'), table_name='odm_jobs')
-    op.drop_index('idx_project_task', table_name='odm_jobs')
+    # op.drop_index('idx_project_task', table_name='odm_jobs')
     op.drop_index('idx_celery_task_id', table_name='odm_jobs')
     op.drop_table('odm_jobs')
     # ### end Alembic commands ###

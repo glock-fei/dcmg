@@ -11,3 +11,5 @@ shapely==2.0.7
 rasterio==1.4.3
 openpyxl==3.1.5
 pandas==2.3.3
+exifread==3.5.1
+pyproj==3.6.1
