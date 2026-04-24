@@ -11,7 +11,6 @@ from fastapi.exceptions import HTTPException
 from sqlalchemy import desc
 from sqlalchemy.orm import Session, selectinload
 
-from models.session import get_database
 import models
 from utils.cedoke import generate_run_id
 import utils
@@ -44,7 +43,7 @@ async def get_odm_jobs(
         page: int = 1,
         limit: int = 1000,
         only_running: bool = True,
-        db: Session = Depends(get_database)
+        db: Session = Depends(models.db_manager.get_database)
 ):
     """
     ## Get ODM tasks List
@@ -105,7 +104,7 @@ async def get_odm_jobs(
 
 
 @router.post('/create_odm_job')
-async def create_odm_job(data: utils.OdmJob, db: Session = Depends(get_database)):
+async def create_odm_job(data: utils.OdmJob, db: Session = Depends(models.db_manager.get_database)):
     """
     ## Create ODM Task
     Create a new ODM task and initiate the image processing pipeline.
@@ -210,7 +209,7 @@ async def create_odm_job(data: utils.OdmJob, db: Session = Depends(get_database)
 
 
 @router.get('/cancel_odm_job')
-async def cancel_odm_job(project_id: int, task_id: str, db: Session = Depends(get_database)):
+async def cancel_odm_job(project_id: int, task_id: str, db: Session = Depends(models.db_manager.get_database)):
     """
     ## Cancel an ODM task that is pending, running, or waiting.
 
@@ -272,7 +271,7 @@ async def cancel_odm_job(project_id: int, task_id: str, db: Session = Depends(ge
 
 
 @router.get('/remove_odm_job', status_code=status.HTTP_204_NO_CONTENT)
-async def remove_odm_job(project_id: int, task_id: str, db: Session = Depends(get_database)) -> None:
+async def remove_odm_job(project_id: int, task_id: str, db: Session = Depends(models.db_manager.get_database)) -> None:
     """
     ### Remove an ODM task that is completed, failed, or canceled.
 
@@ -323,7 +322,7 @@ async def remove_odm_job(project_id: int, task_id: str, db: Session = Depends(ge
 @router.post('/generate_report', status_code=status.HTTP_204_NO_CONTENT)
 async def generate_report(
         data: utils.OdmGenRep,
-        db: Session = Depends(get_database)
+        db: Session = Depends(models.db_manager.get_database)
 ) -> None:
     """
     ### Save the ODM report for a completed ODM task.
@@ -416,7 +415,7 @@ async def generate_report(
 async def save_report(
         project_id: int,
         task_id: str,
-        db: Session = Depends(get_database)
+        db: Session = Depends(models.db_manager.get_database)
 ):
     """
     ## Save the ODM report for a completed ODM task.
@@ -564,7 +563,7 @@ async def save_report(
 def get_report_detail(
         project_id: int,
         task_id: str,
-        db: Session = Depends(get_database)
+        db: Session = Depends(models.db_manager.get_database)
 ):
     """
     ## Get the ODM report by project ID and task ID.
@@ -619,7 +618,7 @@ def get_reports(
         page: int = 1,
         limit: int = 1000,
         only_running: bool = True,
-        db: Session = Depends(get_database)
+        db: Session = Depends(models.db_manager.get_database)
 ):
     """
     ## Get the list of ODM reports.
@@ -661,7 +660,7 @@ def upload_report(
         data: utils.UploadRepTask,
         token: Annotated[str, Header()],
         cid: Annotated[str, Header()],
-        db: Session = Depends(get_database)
+        db: Session = Depends(models.db_manager.get_database)
 ):
     """
     ## Upload the ODM report to OSS and commit to online system.
@@ -755,7 +754,7 @@ def upload_report(
 
 
 @router.get('/cancel_upload_task', status_code=status.HTTP_204_NO_CONTENT)
-async def cancel_upload_task(project_id: int, task_id: str, db: Session = Depends(get_database)):
+async def cancel_upload_task(project_id: int, task_id: str, db: Session = Depends(models.db_manager.get_database)):
     """
     ## Cancel the ODM report upload task.
     This endpoint cancels the ODM report upload task by:

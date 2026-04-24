@@ -8,7 +8,6 @@ from fastapi.exceptions import HTTPException
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session, selectinload
 
-from models.session import get_database
 import models
 import utils
 import worker.tasks as tasks
@@ -55,7 +54,7 @@ def _get_odm_report_and_job(db: Session, project_id: int, task_id: str) -> model
 
 
 @router.get('/samplings')
-async def list_sampling_records(project_id: int, task_id: str, db: Session = Depends(get_database)):
+async def list_sampling_records(project_id: int, task_id: str, db: Session = Depends(models.db_manager.get_database)):
     """
     ## List sampling records for an ODM task
 
@@ -87,7 +86,7 @@ async def list_sampling_records(project_id: int, task_id: str, db: Session = Dep
 
 @router.get('/samplings/{sampling_id}')
 async def get_sampling_record_with_statistics(sampling_id: int, latest_only: bool = True,
-                                              db: Session = Depends(get_database)):
+                                              db: Session = Depends(models.db_manager.get_database)):
     """
     ## Get detailed information for a specific sampling record including statistics
 
@@ -129,7 +128,7 @@ async def get_sampling_record_with_statistics(sampling_id: int, latest_only: boo
 
 
 @router.post('/samplings', status_code=status.HTTP_201_CREATED)
-async def create_sampling_record(data: utils.Sampling, db: Session = Depends(get_database)):
+async def create_sampling_record(data: utils.Sampling, db: Session = Depends(models.db_manager.get_database)):
     """
     ## Create a new sampling record
 
@@ -152,7 +151,7 @@ async def create_sampling_record(data: utils.Sampling, db: Session = Depends(get
 
 
 @router.post('/samplings/retrieve_or_create')
-async def retrieve_or_create_sampling_records(data: utils.Sampling, db: Session = Depends(get_database)):
+async def retrieve_or_create_sampling_records(data: utils.Sampling, db: Session = Depends(models.db_manager.get_database)):
     """
     ## Get or create sampling record for an ODM task
 
@@ -192,7 +191,7 @@ async def retrieve_or_create_sampling_records(data: utils.Sampling, db: Session 
 async def initiate_sampling_statistics(
         sampling_id: int,
         data: list[utils.QuadratBase],
-        db: Session = Depends(get_database)
+        db: Session = Depends(models.db_manager.get_database)
 ):
     """
     ## Initiate sampling statistics calculation
@@ -275,7 +274,7 @@ async def initiate_sampling_statistics(
 @router.delete('/samplings/{sampling_id}', status_code=status.HTTP_204_NO_CONTENT)
 async def delete_sampling_record(
         sampling_id: int,
-        db: Session = Depends(get_database)
+        db: Session = Depends(models.db_manager.get_database)
 ):
     """
     ## Delete a sampling record
@@ -299,7 +298,7 @@ async def delete_sampling_record(
 @router.get('/samplings/{sampling_id}/export_to_excel')
 async def export_sampling_record_to_excel(sampling_id: int, filename: Optional[str] = None,
                                           stream: bool = False,
-                                          db: Session = Depends(get_database)):
+                                          db: Session = Depends(models.db_manager.get_database)):
     """
     Export sampling record statistics to Excel file and return as streaming response or file path
 
@@ -355,7 +354,7 @@ async def export_sampling_record_to_excel(sampling_id: int, filename: Optional[s
 async def delete_quadrat_record(
         sampling_id: int,
         quadrat_id: int,
-        db: Session = Depends(get_database)
+        db: Session = Depends(models.db_manager.get_database)
 ):
     """
     ## Delete a quadrat record

@@ -20,6 +20,7 @@ class JobStatus(Enum):
     Completed = "completed"
     Failed = "failed"
     Uploaded = "uploaded"
+    Canceled = "canceled"
 
 
 class JobRunner(BaseModel):
@@ -35,7 +36,7 @@ class JobSettings(BaseModel):
     """
     The settings of a job.
     """
-    images_dir: str
+    images_dir: Optional[str] = None
     run_id: Optional[str] = None
     job_name: Optional[str] = None
     gsd_cm: float = 0.32

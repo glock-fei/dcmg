@@ -24,7 +24,7 @@ router = APIRouter(prefix='/croppheno')
 
 
 @router.post('/jobs', status_code=status.HTTP_201_CREATED)
-async def create_croppheno_job(data: utils.VdcmCreate, db: Session = Depends(models.get_database)):
+async def create_croppheno_job(data: utils.VdcmCreate, db: Session = Depends(models.db_manager.get_database)):
     """
     ### Create a new CropPheno job
 
@@ -104,7 +104,7 @@ async def create_croppheno_job(data: utils.VdcmCreate, db: Session = Depends(mod
 
 
 @router.patch('/jobs/{no}/progress')
-async def update_job_progress(no: str, percent: float, db: Session = Depends(models.get_database)):
+async def update_job_progress(no: str, percent: float, db: Session = Depends(models.db_manager.get_database)):
     """
     ### Update the progress of a VDCM job
 
@@ -145,7 +145,7 @@ async def get_jobs(
         limit: int = 1000,
         state: utils.OdmJobStatus = None,
         title: str = None,
-        db: Session = Depends(models.get_database)
+        db: Session = Depends(models.db_manager.get_database)
 ):
     """
     ### Retrieve VDCM jobs
@@ -201,7 +201,7 @@ async def get_jobs(
 @router.post('/jobs/{no}/cancel')
 async def cancel_job_by_no(
         no: str,
-        db: Session = Depends(models.get_database)
+        db: Session = Depends(models.db_manager.get_database)
 ):
     """
     ### Cancel VDCM jobs
@@ -248,7 +248,7 @@ async def cancel_job_by_no(
 @router.delete('/jobs/{no}', status_code=status.HTTP_204_NO_CONTENT)
 async def remove_job_by_no(
         no: str,
-        db: Session = Depends(models.get_database)
+        db: Session = Depends(models.db_manager.get_database)
 ):
     """
     ### Remove a VDCM job completely
@@ -309,7 +309,7 @@ def upload_report(
         cid: Annotated[str, Header()],
         terminal_id: Annotated[str, Header()],
         terminal_type: Annotated[str, Header()],
-        db: Session = Depends(models.get_database)
+        db: Session = Depends(models.db_manager.get_database)
 ):
     """
     ### Initiate report upload process for a completed VDCM job

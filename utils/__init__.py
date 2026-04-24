@@ -58,7 +58,7 @@ from .radiometric import (
 )
 
 # DCM utilities
-from .cedoke import generate_run_id
+from .cedoke import generate_run_id, JobStatus
 
 # Sampling data export utilities
 from .sampling_data_exporter import create_template, generate_excel
@@ -115,8 +115,10 @@ __all__ = [
 
     # DCM utilities
     'generate_run_id',
-    
+    'JobStatus',
+
     # Sampling data export utilities
     'create_template',
     'generate_excel'
+
 ]

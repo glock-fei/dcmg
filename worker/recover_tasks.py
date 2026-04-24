@@ -5,8 +5,8 @@ from typing import List, Type
 from celery.contrib.abortable import AbortableAsyncResult
 from fastapi import FastAPI
 
-from models import with_db_session, OdmJobs, OdmReport
 from utils import OdmJobStatus, OdmState, OdmUploadState
+import models
 
 logger = logging.getLogger(__name__)
 
@@ -17,19 +17,19 @@ async def recover_job_failed(app: FastAPI):
     Recover tasks that were interrupted by system shutdown.
     This function should be called when the application starts.
     """
-    with with_db_session() as db:
+    with models.db_manager.with_db_session() as db:
         # Recover failed OdmJobs
         _recover_failed_tasks(
-            db.query(OdmJobs).filter(
-                OdmJobs.state == OdmJobStatus.failed.value,
+            db.query(models.OdmJobs).filter(
+                models.OdmJobs.state == OdmJobStatus.failed.value,
             ).all(),
             OdmState
         )
 
         # Recover failed OdmReports
         _recover_failed_tasks(
-            db.query(OdmReport).filter(
-                OdmReport.state == OdmJobStatus.failed.value,
+            db.query(models.OdmReport).filter(
+                models.OdmReport.state == OdmJobStatus.failed.value,
             ).all(),
             OdmUploadState
         )

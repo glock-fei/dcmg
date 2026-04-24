@@ -17,7 +17,6 @@ from fastapi import HTTPException
 import models
 import utils
 from worker.app import app
-from models import with_db_session, OdmJobs, OdmReport, OdmGeTask
 
 logger = logging.getLogger(__name__)
 
@@ -52,8 +51,12 @@ def _update_report_state(celery_task_id: str, upload_state: utils.OdmUploadState
 
     """
     current_progress = _get_upload_progress(upload_state.total_progress)
-    with with_db_session() as db:
-        report: OdmReport = db.query(OdmReport).filter(OdmReport.celery_task_id == celery_task_id).first()
+    with models.db_manager.with_db_session() as db:
+        # find job
+        report: models.OdmReport = db.query(models.OdmReport).filter(
+            models.OdmReport.celery_task_id == celery_task_id
+        ).first()
+
         if report:
             report.state = upload_state.state
             report.err_msg = upload_state.error
@@ -75,8 +78,8 @@ def _update_odm_state(celery_task_id: str, odm_state: utils.OdmState):
         celery_task_id: The Celery task ID
         odm_state (OdmState): The current state of the ODM job
     """
-    with with_db_session() as db:
-        job: OdmJobs = db.query(OdmJobs).filter(OdmJobs.celery_task_id == celery_task_id).first()
+    with models.db_manager.with_db_session() as db:
+        job: models.OdmJobs = db.query(models.OdmJobs).filter(models.OdmJobs.celery_task_id == celery_task_id).first()
         if job:
             job.state = odm_state.state
             job.odm_host = odm_state.host
@@ -97,8 +100,12 @@ def _update_getate(celery_task_id: str, state_base: utils.StateBase):
         celery_task_id: The Celery task ID
         state_base (StateBase): The current state of the ODM job
     """
-    with with_db_session() as db:
-        getask: OdmGeTask = db.query(OdmGeTask).filter_by().filter(OdmGeTask.celery_task_id == celery_task_id).first()
+    with models.db_manager.with_db_session() as db:
+        # find job
+        getask: models.OdmGeTask = db.query(models.OdmGeTask).filter_by().filter(
+            models.OdmGeTask.celery_task_id == celery_task_id
+        ).first()
+
         if getask:
             getask.state = state_base.state
             getask.err_msg = state_base.error
@@ -540,8 +547,12 @@ def _process_sample_plot_data(
         shutil.copy2(img, sample_plot_dest_dir)
 
     data.src_folder = str(sample_plot_dest_dir)
-    with with_db_session() as db:
-        db.query(OdmJobs).filter(OdmJobs.celery_task_id == celery_task_id).update({OdmJobs.sample_plot: data.dict()})
+    with models.db_manager.with_db_session() as db:
+
+        db.query(models.OdmJobs).filter(
+            models.OdmJobs.celery_task_id == celery_task_id
+        ).update({models.OdmJobs.sample_plot: data.dict()})
+
         db.commit()
 
     logger.info("Copyed sample plot to %s", sample_plot_dest_dir)
@@ -579,8 +590,10 @@ def _process_radiometric_data(
     with open(config_path, 'w', encoding='utf-8') as f:
         json.dump(radiometric, f, indent=4, ensure_ascii=False)
 
-    with with_db_session() as db:
-        db.query(OdmJobs).filter(OdmJobs.celery_task_id == celery_task_id).update({OdmJobs.radiometric: radiometric})
+    with models.db_manager.with_db_session() as db:
+        db.query(models.OdmJobs).filter(models.OdmJobs.celery_task_id == celery_task_id).update(
+            {models.OdmJobs.radiometric: radiometric}
+        )
         db.commit()
 
     logger.info("Saved radiometric data to %s", config_path)
@@ -653,7 +666,7 @@ def sampling_statistics(
         logger.info("Completed processing all quadrats for all algorithms. Total records: %d", len(records))
         # save sampling statistics to database
         if len(records) > 0:
-            with with_db_session() as db:
+            with models.db_manager.with_db_session() as db:
                 models.OdmQuadratStatistics.bulk_upsert(db, records)
                 db.commit()
                 logger.info("Saved %d records to database", len(records))
@@ -674,7 +687,7 @@ def sampling_statistics(
             logger.info("Sampling statistics task completed successfully")
 
         # Lastly, update the sampling record with the latest progress.
-        with with_db_session() as db:
+        with models.db_manager.with_db_session() as db:
             samprd = db.query(models.OdmSamplingRecord).filter(
                 models.OdmSamplingRecord.celery_task_id == self.request.id
             ).first()

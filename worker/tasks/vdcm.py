@@ -179,7 +179,7 @@ def _update_state(
     Returns:
         None
     """
-    with models.with_db_session() as db:
+    with models.db_manager.with_db_session() as db:
         vdtask: models.VdcmJobs = db.query(models.VdcmJobs).filter(
             models.VdcmJobs.celery_task_id == celery_task_id).first()
 
@@ -307,7 +307,7 @@ def reconstruction(
         )
 
         # Update container ID in database using update statement
-        with models.with_db_session() as db:
+        with models.db_manager.with_db_session() as db:
             db.query(models.VdcmJobs).filter(models.VdcmJobs.celery_task_id == self.request.id).update(
                 {
                     models.VdcmJobs.container_id: container.id,
@@ -406,7 +406,7 @@ def _update_upload_state(
     Returns:
         None
     """
-    with models.with_db_session() as db:
+    with models.db_manager.with_db_session() as db:
         job_upload: models.VdcmUploads = db.query(models.VdcmUploads).filter(models.VdcmUploads.job_id == job_id).first()
 
         if job_upload:
@@ -458,7 +458,7 @@ def update_phenotype_report(
     upload_info = {}
 
     # Retrieve the VDCM job from the database
-    with models.with_db_session() as db:
+    with models.db_manager.with_db_session() as db:
         query = db.query(models.VdcmJobs).outerjoin(models.VdcmUploads, models.VdcmUploads.job_id == models.VdcmJobs.id)
         query = query.filter(models.VdcmJobs.id == job_id)
         job: models.VdcmJobs = query.first()

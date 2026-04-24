@@ -8,3 +8,17 @@ from .odm import (
     sampling_statistics
 )
 from .vdcm import reconstruction, update_phenotype_report
+from .yoscm import start_yoscm_task
+
+__all__ = [
+    'copy_image_to_odm',
+    'abort_task',
+    'get_current_state',
+    'generate_odm_report',
+    'upload_odm_report_to_cloud',
+    'get_report_current_state',
+    'sampling_statistics',
+    'reconstruction',
+    'update_phenotype_report',
+    'start_yoscm_task'
+]
